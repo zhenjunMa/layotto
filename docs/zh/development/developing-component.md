@@ -89,7 +89,7 @@
 
 那么用户怎么配"我要用zookeeper"呢？ 我们需要给一个示例配置，一方面供用户参考，一方面拿来跑集成测试
 
-可以复制一份别的组件的json配置文件，例如开发分布式锁组件的时候，复制configs/config_lock_redis.json，粘贴成configs/config_lock_zookeeper.json
+可以复制一份别的组件的json配置文件，例如开发分布式锁组件的时候，复制configs/config_redis.json，粘贴成configs/config_zookeeper.json
 
 之后编辑修改一下图中的配置：
 
@@ -112,6 +112,7 @@
 
 注：demo的代码里如果出现不该有的错误，可以直接panic。后续我们会直接用demo跑集成测试，如果panic了代表集成测试没有通过。
 例如demo/lock/redis/client.go 里：
+
 ```go
     //....
 	cli, err := client.NewClient()

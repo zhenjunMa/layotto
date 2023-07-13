@@ -1,48 +1,33 @@
-SHELL = /bin/bash
-export GO111MODULE=on
+# Copyright 2021 Layotto Authors
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 
-MAJOR_VERSION    = $(shell cat VERSION)
-TARGET           = layotto
-ARM_TARGET       = layotto.aarch64
-PROJECT_NAME     = mosn.io/layotto
-CONFIG_FILE     = runtime_config.json
-BUILD_IMAGE     = godep-builder
-IMAGE_NAME      = layotto
-GIT_VERSION     = $(shell git log -1 --pretty=format:%h)
-REPOSITORY      = layotto/${IMAGE_NAME}
+# http://www.apache.org/licenses/LICENSE-2.0
 
-build-local:
-	@rm -rf build/bundles/${MAJOR_VERSION}/binary
-	CGO_ENABLED=1 go build \
-		-ldflags "-B 0x$(shell head -c20 /dev/urandom|od -An -tx1|tr -d ' \n') -X main.Version=${MAJOR_VERSION}(${GIT_VERSION}) -X ${PROJECT_NAME}/pkg/types.IstioVersion=${ISTIO_VERSION}" \
-		-v -o ${TARGET} \
-		${PROJECT_NAME}/cmd/layotto
-	mkdir -p build/bundles/${MAJOR_VERSION}/binary
-	mv ${TARGET} build/bundles/${MAJOR_VERSION}/binary
-	@cd build/bundles/${MAJOR_VERSION}/binary && $(shell which md5sum) -b ${TARGET} | cut -d' ' -f1  > ${TARGET}.md5
-	cp configs/${CONFIG_FILE} build/bundles/${MAJOR_VERSION}/binary
-	@cd build/bundles/${MAJOR_VERSION}/binary
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
-build-arm64:
-	@rm -rf build/bundles/${MAJOR_VERSION}/binary
-	GOOS=linux GOARCH=arm64 go build\
-		-a -ldflags "-B 0x$(shell head -c20 /dev/urandom|od -An -tx1|tr -d ' \n')" \
-		-v -o ${ARM_TARGET} \
-		${PROJECT_NAME}/cmd/layotto
-	mkdir -p build/bundles/${MAJOR_VERSION}/binary
-	mv ${ARM_TARGET} build/bundles/${MAJOR_VERSION}/binary
-	@cd build/bundles/${MAJOR_VERSION}/binary && $(shell which md5sum) -b ${ARM_TARGET} | cut -d' ' -f1  > ${ARM_TARGET}.md5
+# All make targets should be implemented in make/*.mk
+# ====================================================================================================
+# Supported Targets: (Run `make help` to see more information)
+# ====================================================================================================
 
-image:
-	docker build --rm -t ${BUILD_IMAGE} build/contrib/builder/binary
-	docker run --rm -v $(shell pwd):/go/src/${PROJECT_NAME} -w /go/src/${PROJECT_NAME} ${BUILD_IMAGE} make build-local
-	@rm -rf IMAGEBUILD
-	cp -r build/contrib/builder/image IMAGEBUILD && cp build/bundles/${MAJOR_VERSION}/binary/${TARGET} IMAGEBUILD && cp -r configs IMAGEBUILD && cp -r etc IMAGEBUILD
-	docker build --rm -t ${REPOSITORY}:${MAJOR_VERSION}-${GIT_VERSION} IMAGEBUILD
-	rm -rf IMAGEBUILD
+# This file is a wrapper around `make` so that we can force on the
+# --warn-undefined-variables flag.  Sure, you can set
+# `MAKEFLAGS += --warn-undefined-variables` from inside of a Makefile,
+# but then it won't turn on until the second phase (recipe execution),
+# and won't actually be on during the initial phase (parsing).
+# See: https://www.gnu.org/software/make/manual/make.html#Reading-Makefiles
 
-wasm-integrate:
-	docker build --rm -t ${BUILD_IMAGE} build/contrib/builder/image/wasm
-	docker run --rm -v $(shell pwd):/go/src/${PROJECT_NAME} -v $(shell pwd)/test/test.sh:/go/src/${PROJECT_NAME}/test.sh -w /go/src/${PROJECT_NAME} ${BUILD_IMAGE} sh ./test.sh
-
-.PHONY: build
+# Have everything-else ("%") depend on _run (which uses
+# $(MAKECMDGOALS) to decide what to run), rather than having
+# everything else run $(MAKE) directly, since that'd end up running
+# multiple sub-Makes if you give multiple targets on the CLI.
+_run:
+	@$(MAKE) --warn-undefined-variables -f make/common.mk $(MAKECMDGOALS)
+.PHONY: _run
+$(if $(MAKECMDGOALS),$(MAKECMDGOALS): %: _run)

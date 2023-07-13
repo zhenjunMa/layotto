@@ -1,31 +1,59 @@
+// Copyright 2021 Layotto Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package etcd
 
 import (
 	"fmt"
-	"mosn.io/layotto/components/sequencer"
-	"mosn.io/pkg/log"
+	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"testing"
 	"time"
+
+	"mosn.io/pkg/log"
+
+	"mosn.io/layotto/components/sequencer"
 
 	"github.com/stretchr/testify/assert"
 	"go.etcd.io/etcd/server/v3/embed"
 )
 
 const key = "resource_xxx"
-const key2 = "resource_xxx2"
 
-const key3 = "resource_xxx3"
-const key4 = "resource_xxx4"
+// GetFreePort returns a free port from the OS.
+func GetFreePort() (int, error) {
+	addr, err := net.ResolveTCPAddr("tcp", "localhost:0")
+	if err != nil {
+		return 0, err
+	}
+
+	l, err := net.ListenTCP("tcp", addr)
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
 
 func TestEtcd_Init(t *testing.T) {
 	var err error
 	var etcdServer *embed.Etcd
 	var etcdTestDir = "init.test.etcd"
-	var etcdUrl = "localhost:2380"
+	port, _ := GetFreePort()
+	var etcdUrl = "localhost:" + strconv.Itoa(port)
 
-	etcdServer, err = startEtcdServer(etcdTestDir, 2380)
+	etcdServer, err = startEtcdServer(etcdTestDir, port)
 	assert.NoError(t, err)
 	defer func() {
 		etcdServer.Server.Stop()
@@ -88,9 +116,10 @@ func TestEtcd_GetNextId(t *testing.T) {
 	var resp *sequencer.GetNextIdResponse
 	var etcdServer *embed.Etcd
 	var etcdTestDir = "trylock.test.etcd"
-	var etcdUrl = "localhost:23780"
+	port, _ := GetFreePort()
+	var etcdUrl = "localhost:" + strconv.Itoa(port)
 
-	etcdServer, err = startEtcdServer(etcdTestDir, 23780)
+	etcdServer, err = startEtcdServer(etcdTestDir, port)
 	assert.NoError(t, err)
 	defer func() {
 		etcdServer.Server.Stop()
@@ -123,6 +152,9 @@ func TestEtcd_GetNextId(t *testing.T) {
 	expected = 2
 	assert.Equal(t, expected, resp.NextId)
 
+	support, _, err := comp.GetSegment(nil)
+	assert.False(t, support)
+	assert.Nil(t, err)
 }
 
 func startEtcdServer(dir string, port int) (*embed.Etcd, error) {

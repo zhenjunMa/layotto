@@ -17,10 +17,12 @@
 package apollo
 
 import (
-	"github.com/zouyx/agollo/v4/storage"
-	"mosn.io/layotto/components/configstores"
-	"mosn.io/pkg/log"
 	"time"
+
+	"github.com/apolloconfig/agollo/v4/storage"
+	"mosn.io/pkg/log"
+
+	"mosn.io/layotto/components/configstores"
 )
 
 type changeListener struct {
@@ -33,6 +35,7 @@ type RepoForListener interface {
 	splitKey(keyWithLabel string) (key string, label string)
 	getAllTags(group string, keyWithLabel string) (tags map[string]string, err error)
 	GetAppId() string
+	GetStoreName() string
 }
 
 func newChangeListener(c RepoForListener) *changeListener {
@@ -72,19 +75,12 @@ func (lis *changeListener) notify(s *subscriber, keyWithLabel string, change *st
 			log.DefaultLogger.Errorf("panic when notify subscriber. %v", r)
 			// make sure unused chan are all deleted
 			if lis != nil && lis.subscribers != nil {
-				go func() {
-					defer func() {
-						if r := recover(); r != nil {
-							log.DefaultLogger.Errorf("panic when removing subscribers after panic. %v", r)
-						}
-					}()
-					lis.subscribers.remove(s)
-				}()
+				lis.subscribers.remove(s)
 			}
 		}
 	}()
 	// 2 prepare response
-	res := &configstores.SubscribeResp{StoreName: storename, AppId: lis.store.GetAppId()}
+	res := &configstores.SubscribeResp{StoreName: lis.store.GetStoreName(), AppId: lis.store.GetAppId()}
 	item := &configstores.ConfigurationItem{}
 	item.Group = s.group
 	item.Key, item.Label = lis.store.splitKey(keyWithLabel)

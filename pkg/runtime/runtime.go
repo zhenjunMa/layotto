@@ -18,35 +18,48 @@ package runtime
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
-	"github.com/dapr/components-contrib/contenttype"
+	"strings"
+	"time"
+
+	"mosn.io/layotto/components/pkg/common"
+	"mosn.io/layotto/pkg/runtime/lifecycle"
+
+	"mosn.io/layotto/components/oss"
+
+	"mosn.io/layotto/pkg/runtime/ref"
+
+	refconfig "mosn.io/layotto/components/ref"
+
+	"github.com/dapr/components-contrib/secretstores"
+
+	"mosn.io/layotto/components/custom"
+	msecretstores "mosn.io/layotto/pkg/runtime/secretstores"
+
+	"github.com/dapr/components-contrib/bindings"
+
+	mbindings "mosn.io/layotto/pkg/runtime/bindings"
+
+	"mosn.io/layotto/components/file"
+
 	"github.com/dapr/components-contrib/pubsub"
 	"github.com/dapr/components-contrib/state"
-	jsoniter "github.com/json-iterator/go"
 	rawGRPC "google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	mgrpc "mosn.io/mosn/pkg/filter/network/grpc"
+	"mosn.io/pkg/log"
+
 	"mosn.io/layotto/components/configstores"
 	"mosn.io/layotto/components/hello"
 	"mosn.io/layotto/components/lock"
-	"mosn.io/layotto/components/pkg/actuators"
 	"mosn.io/layotto/components/pkg/info"
 	"mosn.io/layotto/components/rpc"
 	"mosn.io/layotto/components/sequencer"
-	"mosn.io/layotto/pkg/actuator/health"
 	"mosn.io/layotto/pkg/grpc"
-	"mosn.io/layotto/pkg/integrate/actuator"
 	runtime_lock "mosn.io/layotto/pkg/runtime/lock"
 	runtime_pubsub "mosn.io/layotto/pkg/runtime/pubsub"
 	runtime_sequencer "mosn.io/layotto/pkg/runtime/sequencer"
 	runtime_state "mosn.io/layotto/pkg/runtime/state"
-	"mosn.io/layotto/pkg/wasm"
-	runtimev1pb "mosn.io/layotto/spec/proto/runtime/v1"
-	mgrpc "mosn.io/mosn/pkg/filter/network/grpc"
-	"mosn.io/pkg/log"
-	"strings"
 )
 
 type MosnRuntime struct {
@@ -55,57 +68,82 @@ type MosnRuntime struct {
 	info          *info.RuntimeInfo
 	srv           mgrpc.RegisteredServer
 	// component registry
-	helloRegistry       hello.Registry
-	configStoreRegistry configstores.Registry
-	rpcRegistry         rpc.Registry
-	pubSubRegistry      runtime_pubsub.Registry
-	stateRegistry       runtime_state.Registry
-	lockRegistry        runtime_lock.Registry
-	sequencerRegistry   runtime_sequencer.Registry
+	helloRegistry           hello.Registry
+	configStoreRegistry     configstores.Registry
+	rpcRegistry             rpc.Registry
+	pubSubRegistry          runtime_pubsub.Registry
+	stateRegistry           runtime_state.Registry
+	lockRegistry            runtime_lock.Registry
+	sequencerRegistry       runtime_sequencer.Registry
+	fileRegistry            file.Registry
+	ossRegistry             oss.Registry
+	bindingsRegistry        mbindings.Registry
+	secretStoresRegistry    msecretstores.Registry
+	customComponentRegistry custom.Registry
+	Injector                *ref.DefaultInjector
 	// component pool
-	hellos            map[string]hello.HelloService
-	configStores      map[string]configstores.Store
-	rpcs              map[string]rpc.Invoker
-	pubSubs           map[string]pubsub.PubSub
-	topicPerComponent map[string]TopicSubscriptions
+	hellos map[string]hello.HelloService
+	// config management system component
+	configStores map[string]configstores.Store
+	rpcs         map[string]rpc.Invoker
+	pubSubs      map[string]pubsub.PubSub
+	// state implementations store here are already initialized
 	states            map[string]state.Store
+	files             map[string]file.File
+	oss               map[string]oss.Oss
 	locks             map[string]lock.LockStore
 	sequencers        map[string]sequencer.Store
+	outputBindings    map[string]bindings.OutputBinding
+	secretStores      map[string]secretstores.SecretStore
+	customComponent   map[string]map[string]custom.Component
+	dynamicComponents map[lifecycle.ComponentKey]common.DynamicComponent
+	extensionComponents
 	// app callback
 	AppCallbackConn *rawGRPC.ClientConn
 	// extends
-	errInt ErrInterceptor
-	json   jsoniter.API
+	errInt            ErrInterceptor
+	started           bool
+	initRuntimeStages []initRuntimeStage
 }
 
-type Details struct {
-	metadata map[string]string
+func (m *MosnRuntime) RuntimeConfig() *MosnRuntimeConfig {
+	return m.runtimeConfig
 }
 
-type TopicSubscriptions struct {
-	topic2Details map[string]Details
-}
+type initRuntimeStage func(o *runtimeOptions, m *MosnRuntime) error
 
 func NewMosnRuntime(runtimeConfig *MosnRuntimeConfig) *MosnRuntime {
 	info := info.NewRuntimeInfo()
 	return &MosnRuntime{
-		runtimeConfig:       runtimeConfig,
-		info:                info,
-		helloRegistry:       hello.NewRegistry(info),
-		configStoreRegistry: configstores.NewRegistry(info),
-		rpcRegistry:         rpc.NewRegistry(info),
-		pubSubRegistry:      runtime_pubsub.NewRegistry(info),
-		stateRegistry:       runtime_state.NewRegistry(info),
-		lockRegistry:        runtime_lock.NewRegistry(info),
-		sequencerRegistry:   runtime_sequencer.NewRegistry(info),
-		hellos:              make(map[string]hello.HelloService),
-		configStores:        make(map[string]configstores.Store),
-		rpcs:                make(map[string]rpc.Invoker),
-		pubSubs:             make(map[string]pubsub.PubSub),
-		states:              make(map[string]state.Store),
-		locks:               make(map[string]lock.LockStore),
-		sequencers:          make(map[string]sequencer.Store),
-		json:                jsoniter.ConfigFastest,
+		runtimeConfig:           runtimeConfig,
+		info:                    info,
+		helloRegistry:           hello.NewRegistry(info),
+		configStoreRegistry:     configstores.NewRegistry(info),
+		rpcRegistry:             rpc.NewRegistry(info),
+		pubSubRegistry:          runtime_pubsub.NewRegistry(info),
+		stateRegistry:           runtime_state.NewRegistry(info),
+		bindingsRegistry:        mbindings.NewRegistry(info),
+		fileRegistry:            file.NewRegistry(info),
+		ossRegistry:             oss.NewRegistry(info),
+		lockRegistry:            runtime_lock.NewRegistry(info),
+		sequencerRegistry:       runtime_sequencer.NewRegistry(info),
+		secretStoresRegistry:    msecretstores.NewRegistry(info),
+		customComponentRegistry: custom.NewRegistry(info),
+		hellos:                  make(map[string]hello.HelloService),
+		configStores:            make(map[string]configstores.Store),
+		rpcs:                    make(map[string]rpc.Invoker),
+		pubSubs:                 make(map[string]pubsub.PubSub),
+		states:                  make(map[string]state.Store),
+		files:                   make(map[string]file.File),
+		oss:                     make(map[string]oss.Oss),
+		locks:                   make(map[string]lock.LockStore),
+		sequencers:              make(map[string]sequencer.Store),
+		outputBindings:          make(map[string]bindings.OutputBinding),
+		secretStores:            make(map[string]secretstores.SecretStore),
+		customComponent:         make(map[string]map[string]custom.Component),
+		dynamicComponents:       make(map[lifecycle.ComponentKey]common.DynamicComponent),
+		extensionComponents:     *newExtensionComponents(),
+		started:                 false,
 	}
 }
 
@@ -113,11 +151,37 @@ func (m *MosnRuntime) GetInfo() *info.RuntimeInfo {
 	return m.info
 }
 
-func (m *MosnRuntime) Run(opts ...Option) (mgrpc.RegisteredServer, error) {
-	var o runtimeOptions
-	for _, opt := range opts {
-		opt(&o)
+func (m *MosnRuntime) sendToOutputBinding(name string, req *bindings.InvokeRequest) (*bindings.InvokeResponse, error) {
+	if req.Operation == "" {
+		return nil, errors.New("operation field is missing from request")
 	}
+
+	if binding, ok := m.outputBindings[name]; ok {
+		ops := binding.Operations()
+		for _, o := range ops {
+			if o == req.Operation {
+				return binding.Invoke(req)
+			}
+		}
+		supported := make([]string, 0, len(ops))
+		for _, o := range ops {
+			supported = append(supported, string(o))
+		}
+		return nil, fmt.Errorf("binding %s does not support operation %s. supported operations:%s", name, req.Operation, strings.Join(supported, " "))
+	}
+	return nil, fmt.Errorf("couldn't find output binding %s", name)
+}
+
+func (m *MosnRuntime) Run(opts ...Option) (mgrpc.RegisteredServer, error) {
+	// 0. mark already started
+	m.started = true
+	// 1. init runtime stage
+	// prepare runtimeOptions
+	o := newRuntimeOptions()
+	for _, opt := range opts {
+		opt(o)
+	}
+	// set ErrInterceptor
 	if o.errInt != nil {
 		m.errInt = o.errInt
 	} else {
@@ -125,41 +189,57 @@ func (m *MosnRuntime) Run(opts ...Option) (mgrpc.RegisteredServer, error) {
 			log.DefaultLogger.Errorf("[runtime] occurs an error: "+err.Error()+", "+format, args...)
 		}
 	}
-
-	if err := m.initRuntime(&o); err != nil {
+	// init runtime with runtimeOptions
+	if err := m.initRuntime(o); err != nil {
 		return nil, err
 	}
+	// prepare grpcOpts
 	var grpcOpts []grpc.Option
 	if o.srvMaker != nil {
 		grpcOpts = append(grpcOpts, grpc.WithNewServer(o.srvMaker))
 	}
-	wasm.Layotto = grpc.NewAPI(
-		m.runtimeConfig.AppManagement.AppId,
-		m.hellos,
-		m.configStores,
-		m.rpcs,
-		m.pubSubs,
-		m.states,
-		m.locks,
-		m.sequencers,
-	)
+	// 2. init GrpcAPI stage
+	var apis []grpc.GrpcAPI
+	ac := newApplicationContext(m)
+
+	for _, apiFactory := range o.apiFactorys {
+		api := apiFactory(ac)
+		// init the GrpcAPI
+		if err := api.Init(m.AppCallbackConn); err != nil {
+			return nil, err
+		}
+		apis = append(apis, api)
+	}
+	// put them into grpc options
 	grpcOpts = append(grpcOpts,
 		grpc.WithGrpcOptions(o.options...),
-		grpc.WithAPI(wasm.Layotto),
+		grpc.WithGrpcAPIs(apis),
 	)
-	m.srv = grpc.NewGrpcServer(grpcOpts...)
-	return m.srv, nil
+	// 3. create grpc server
+	var err error
+	m.srv, err = grpc.NewGrpcServer(grpcOpts...)
+	return m.srv, err
 }
 
 func (m *MosnRuntime) Stop() {
 	if m.srv != nil {
 		m.srv.Stop()
 	}
-	actuator.GetRuntimeReadinessIndicator().SetUnhealthy("shutdown")
-	actuator.GetRuntimeLivenessIndicator().SetUnhealthy("shutdown")
 }
 
-func (m *MosnRuntime) initRuntime(o *runtimeOptions) error {
+func (m *MosnRuntime) storeDynamicComponent(kind string, name string, store interface{}) {
+	comp, ok := store.(common.DynamicComponent)
+	if !ok {
+		return
+	}
+	// put it in the components map
+	m.dynamicComponents[lifecycle.ComponentKey{
+		Kind: kind,
+		Name: name,
+	}] = lifecycle.ConcurrentDynamicComponent(comp)
+}
+
+func DefaultInitRuntimeStage(o *runtimeOptions, m *MosnRuntime) error {
 	if m.runtimeConfig == nil {
 		return errors.New("[runtime] init error:no runtimeConfig")
 	}
@@ -167,20 +247,38 @@ func (m *MosnRuntime) initRuntime(o *runtimeOptions) error {
 	if err := m.initAppCallbackConnection(); err != nil {
 		return err
 	}
+
 	// init all kinds of components with config
-	if err := m.initHellos(o.services.hellos...); err != nil {
+	//init secret & config first
+	if err := m.initSecretStores(o.services.secretStores...); err != nil {
 		return err
 	}
 	if err := m.initConfigStores(o.services.configStores...); err != nil {
 		return err
 	}
+	m.Injector = ref.NewDefaultInjector(m.secretStores, m.configStores)
+	if err := m.initCustomComponents(o.services.custom); err != nil {
+		return err
+	}
+	if err := m.initHellos(o.services.hellos...); err != nil {
+		return err
+	}
+	if err := m.initStates(o.services.states...); err != nil {
+		return err
+	}
 	if err := m.initRpcs(o.services.rpcs...); err != nil {
+		return err
+	}
+	if err := m.initOutputBinding(o.services.outputBinding...); err != nil {
 		return err
 	}
 	if err := m.initPubSubs(o.services.pubSubs...); err != nil {
 		return err
 	}
-	if err := m.initStates(o.services.states...); err != nil {
+	if err := m.initFiles(o.services.files...); err != nil {
+		return err
+	}
+	if err := m.initOss(o.services.oss...); err != nil {
 		return err
 	}
 	if err := m.initLocks(o.services.locks...); err != nil {
@@ -189,7 +287,10 @@ func (m *MosnRuntime) initRuntime(o *runtimeOptions) error {
 	if err := m.initSequencers(o.services.sequencers...); err != nil {
 		return err
 	}
-	return nil
+	if err := m.initExtensionComponent(o.services); err != nil {
+		return err
+	}
+	return m.initInputBinding(o.services.inputBinding...)
 }
 
 func (m *MosnRuntime) initHellos(hellos ...*hello.HelloFactory) error {
@@ -197,16 +298,22 @@ func (m *MosnRuntime) initHellos(hellos ...*hello.HelloFactory) error {
 	// register all hello services implementation
 	m.helloRegistry.Register(hellos...)
 	for name, config := range m.runtimeConfig.HelloServiceManagement {
-		h, err := m.helloRegistry.Create(name)
+		h, err := m.helloRegistry.Create(config.Type)
 		if err != nil {
 			m.errInt(err, "create hello's component %s failed", name)
+			return err
+		}
+		//inject component
+		if err := m.initComponentInject(h, config.ComponentRef); err != nil {
 			return err
 		}
 		if err := h.Init(&config); err != nil {
 			m.errInt(err, "init hello's component %s failed", name)
 			return err
 		}
+		// register this component
 		m.hellos[name] = h
+		m.storeDynamicComponent(lifecycle.KindHello, name, h)
 	}
 	return nil
 }
@@ -216,29 +323,27 @@ func (m *MosnRuntime) initConfigStores(configStores ...*configstores.StoreFactor
 	// register all config store services implementation
 	m.configStoreRegistry.Register(configStores...)
 	for name, config := range m.runtimeConfig.ConfigStoreManagement {
-		c, err := m.configStoreRegistry.Create(name)
+		c, err := m.configStoreRegistry.Create(config.Type)
 		if err != nil {
 			m.errInt(err, "create configstore's component %s failed", name)
 			return err
 		}
+		config.AppId = m.runtimeConfig.AppManagement.AppId
+		config.StoreName = name
 		if err := c.Init(&config); err != nil {
 			m.errInt(err, "init configstore's component %s failed", name)
 			return err
 		}
+		// register this component
 		m.configStores[name] = c
-		v := actuators.GetIndicatorWithName(name)
-		//Now don't force user implement actuator of components
-		if v != nil {
-			health.AddLivenessIndicator(name, v.LivenessIndicator)
-			health.AddReadinessIndicator(name, v.ReadinessIndicator)
-		}
+		m.storeDynamicComponent(lifecycle.KindConfig, name, c)
 	}
 	return nil
 }
 
 func (m *MosnRuntime) initRpcs(rpcs ...*rpc.Factory) error {
 	log.DefaultLogger.Infof("[runtime] init rpc service")
-	// register all config store services implementation
+	// register all rpc components
 	m.rpcRegistry.Register(rpcs...)
 	for name, config := range m.runtimeConfig.RpcManagement {
 		c, err := m.rpcRegistry.Create(name)
@@ -250,7 +355,9 @@ func (m *MosnRuntime) initRpcs(rpcs ...*rpc.Factory) error {
 			m.errInt(err, "init rpc's component %s failed", name)
 			return err
 		}
+		// register this component
 		m.rpcs[name] = c
+		m.storeDynamicComponent(lifecycle.KindRPC, name, c)
 	}
 	return nil
 }
@@ -258,27 +365,41 @@ func (m *MosnRuntime) initRpcs(rpcs ...*rpc.Factory) error {
 func (m *MosnRuntime) initPubSubs(factorys ...*runtime_pubsub.Factory) error {
 	// 1. init components
 	log.DefaultLogger.Infof("[runtime] start initializing pubsub components")
-	// register all config store services implementation
+	// register all components implementation
 	m.pubSubRegistry.Register(factorys...)
 	for name, config := range m.runtimeConfig.PubSubManagement {
-		comp, err := m.pubSubRegistry.Create(name)
+		// create component
+		comp, err := m.pubSubRegistry.Create(config.Type)
 		if err != nil {
 			m.errInt(err, "create pubsub component %s failed", name)
 			return err
 		}
+		// check consumerID
 		consumerID := strings.TrimSpace(config.Metadata["consumerID"])
 		if consumerID == "" {
+			if config.Metadata == nil {
+				config.Metadata = make(map[string]string)
+			}
 			config.Metadata["consumerID"] = m.runtimeConfig.AppManagement.AppId
 		}
-
+		//inject secret to component
+		if config.Metadata, err = m.Injector.InjectSecretRef(config.SecretRef, config.Metadata); err != nil {
+			return err
+		}
+		//inject component
+		if err := m.initComponentInject(comp, config.ComponentRef); err != nil {
+			return err
+		}
+		// init this component with the config
 		if err := comp.Init(pubsub.Metadata{Properties: config.Metadata}); err != nil {
 			m.errInt(err, "init pubsub component %s failed", name)
 			return err
 		}
+		// register this component
 		m.pubSubs[name] = comp
+		m.storeDynamicComponent(lifecycle.KindPubsub, name, comp)
 	}
-	// 2. start subscribing
-	return m.startSubscribing()
+	return nil
 }
 
 func (m *MosnRuntime) initStates(factorys ...*runtime_state.Factory) error {
@@ -288,9 +409,17 @@ func (m *MosnRuntime) initStates(factorys ...*runtime_state.Factory) error {
 	// 2. loop initializing
 	for name, config := range m.runtimeConfig.StateManagement {
 		// 2.1. create and store the component
-		comp, err := m.stateRegistry.Create(name)
+		comp, err := m.stateRegistry.Create(config.Type)
 		if err != nil {
 			m.errInt(err, "create state component %s failed", name)
+			return err
+		}
+		//inject secret to component
+		if config.Metadata, err = m.Injector.InjectSecretRef(config.SecretRef, config.Metadata); err != nil {
+			return err
+		}
+		//inject component
+		if err := m.initComponentInject(comp, config.ComponentRef); err != nil {
 			return err
 		}
 		if err := comp.Init(state.Metadata{Properties: config.Metadata}); err != nil {
@@ -298,12 +427,69 @@ func (m *MosnRuntime) initStates(factorys ...*runtime_state.Factory) error {
 			return err
 		}
 		m.states[name] = comp
+		m.storeDynamicComponent(lifecycle.KindState, name, comp)
+
 		// 2.2. save prefix strategy
 		err = runtime_state.SaveStateConfiguration(name, config.Metadata)
 		if err != nil {
 			log.DefaultLogger.Errorf("error save state keyprefix: %s", err.Error())
 			return err
 		}
+	}
+	return nil
+}
+
+func (m *MosnRuntime) initOss(factorys ...*oss.Factory) error {
+	log.DefaultLogger.Infof("[runtime] init oss service")
+
+	// 1. register all oss store services implementation
+	m.ossRegistry.Register(factorys...)
+	// 2. loop initializing
+	for name, config := range m.runtimeConfig.Oss {
+		// 2.1. create the component
+		c, err := m.ossRegistry.Create(config.Type)
+		if err != nil {
+			m.errInt(err, "create oss component %s failed", name)
+			return err
+		}
+		//inject component
+		if err := m.initComponentInject(c, config.ComponentRef); err != nil {
+			return err
+		}
+		// 2.2. init
+		if err := c.Init(context.TODO(), &config); err != nil {
+			m.errInt(err, "init oss component %s failed", name)
+			return err
+		}
+		// register this component
+		m.oss[name] = c
+		m.storeDynamicComponent(lifecycle.KindOss, name, c)
+	}
+	return nil
+}
+
+func (m *MosnRuntime) initFiles(files ...*file.FileFactory) error {
+	log.DefaultLogger.Infof("[runtime] init file service")
+
+	// register all files store services implementation
+	m.fileRegistry.Register(files...)
+
+	for name, config := range m.runtimeConfig.Files {
+		c, err := m.fileRegistry.Create(config.Type)
+		if err != nil {
+			m.errInt(err, "create files component %s failed", name)
+			return err
+		}
+		//inject component
+		if err := m.initComponentInject(c, config.ComponentRef); err != nil {
+			return err
+		}
+		if err := c.Init(context.TODO(), &config); err != nil {
+			m.errInt(err, "init files component %s failed", name)
+			return err
+		}
+		m.files[name] = c
+		m.storeDynamicComponent(lifecycle.KindFile, name, c)
 	}
 	return nil
 }
@@ -315,9 +501,17 @@ func (m *MosnRuntime) initLocks(factorys ...*runtime_lock.Factory) error {
 	// 2. loop initializing
 	for name, config := range m.runtimeConfig.LockManagement {
 		// 2.1. create the component
-		comp, err := m.lockRegistry.Create(name)
+		comp, err := m.lockRegistry.Create(config.Type)
 		if err != nil {
 			m.errInt(err, "create lock component %s failed", name)
+			return err
+		}
+		//inject secret to component
+		if config.Metadata, err = m.Injector.InjectSecretRef(config.SecretRef, config.Metadata); err != nil {
+			return err
+		}
+		//inject component
+		if err := m.initComponentInject(comp, config.ComponentRef); err != nil {
 			return err
 		}
 		// 2.2. init
@@ -332,6 +526,7 @@ func (m *MosnRuntime) initLocks(factorys ...*runtime_lock.Factory) error {
 			return err
 		}
 		m.locks[name] = comp
+		m.storeDynamicComponent(lifecycle.KindLock, name, comp)
 	}
 	return nil
 }
@@ -343,9 +538,17 @@ func (m *MosnRuntime) initSequencers(factorys ...*runtime_sequencer.Factory) err
 	// 2. loop initializing
 	for name, config := range m.runtimeConfig.SequencerManagement {
 		// 2.1. create the component
-		comp, err := m.sequencerRegistry.Create(name)
+		comp, err := m.sequencerRegistry.Create(config.Type)
 		if err != nil {
 			m.errInt(err, "create sequencer component %s failed", name)
+			return err
+		}
+		//inject secret to component
+		if config.Metadata, err = m.Injector.InjectSecretRef(config.SecretRef, config.Metadata); err != nil {
+			return err
+		}
+		//inject component
+		if err := m.initComponentInject(comp, config.ComponentRef); err != nil {
 			return err
 		}
 		// 2.2. init
@@ -356,187 +559,17 @@ func (m *MosnRuntime) initSequencers(factorys ...*runtime_sequencer.Factory) err
 			m.errInt(err, "init sequencer component %s failed", name)
 			return err
 		}
+		// 2.3. save runtime related configs
+		err = runtime_sequencer.SaveSeqConfiguration(name, config.Metadata)
+		if err != nil {
+			m.errInt(err, "save sequencer configuration %s failed", name)
+			return err
+		}
+		// register this component
 		m.sequencers[name] = comp
+		m.storeDynamicComponent(lifecycle.KindSequencer, name, comp)
 	}
 	return nil
-}
-
-func (m *MosnRuntime) startSubscribing() error {
-	// 1. check if there is no need to do it
-	if len(m.pubSubs) == 0 {
-		return nil
-	}
-	topicRoutes, err := m.getInterestedTopics()
-	if err != nil {
-		return err
-	}
-	if len(topicRoutes) == 0 {
-		//	no need
-		return nil
-	}
-	// 2. loop subscribe
-	for name, pubsub := range m.pubSubs {
-		if err := m.beginPubSub(name, pubsub, topicRoutes); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (m *MosnRuntime) beginPubSub(pubsubName string, ps pubsub.PubSub, topicRoutes map[string]TopicSubscriptions) error {
-	// 1. call app to find topic topic2Details.
-	v, ok := topicRoutes[pubsubName]
-	if !ok {
-		return nil
-	}
-	// 2. loop subscribing every <topic, route>
-	for topic, route := range v.topic2Details {
-		// TODO limit topic scope
-		log.DefaultLogger.Debugf("[runtime][beginPubSub]subscribing to topic=%s on pubsub=%s", topic, pubsubName)
-		// ask component to subscribe
-		if err := ps.Subscribe(pubsub.SubscribeRequest{
-			Topic:    topic,
-			Metadata: route.metadata,
-		}, func(ctx context.Context, msg *pubsub.NewMessage) error {
-			if msg.Metadata == nil {
-				msg.Metadata = make(map[string]string, 1)
-			}
-			msg.Metadata[Metadata_key_pubsubName] = pubsubName
-			return m.publishMessageGRPC(ctx, msg)
-		}); err != nil {
-			log.DefaultLogger.Warnf("[runtime][beginPubSub]failed to subscribe to topic %s: %s", topic, err)
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (m *MosnRuntime) getInterestedTopics() (map[string]TopicSubscriptions, error) {
-	// 1. check
-	if m.topicPerComponent != nil {
-		return m.topicPerComponent, nil
-	}
-	if m.AppCallbackConn == nil {
-		return make(map[string]TopicSubscriptions), nil
-	}
-	comp2Topic := make(map[string]TopicSubscriptions)
-	var subscriptions []*runtimev1pb.TopicSubscription
-
-	// 2. handle app subscriptions
-	client := runtimev1pb.NewAppCallbackClient(m.AppCallbackConn)
-	subscriptions = runtime_pubsub.ListTopicSubscriptions(client, log.DefaultLogger)
-	// TODO handle declarative subscriptions
-
-	// 3. prepare result
-	for _, s := range subscriptions {
-		if s == nil {
-			continue
-		}
-		if _, ok := comp2Topic[s.PubsubName]; !ok {
-			comp2Topic[s.PubsubName] = TopicSubscriptions{topic2Details: make(map[string]Details)}
-		}
-		comp2Topic[s.PubsubName].topic2Details[s.Topic] = Details{metadata: s.Metadata}
-	}
-
-	// 4. log
-	if len(comp2Topic) > 0 {
-		for pubsubName, v := range comp2Topic {
-			topics := []string{}
-			for topic := range v.topic2Details {
-				topics = append(topics, topic)
-			}
-			log.DefaultLogger.Infof("[runtime][getInterestedTopics]app is subscribed to the following topics: %v through pubsub=%s", topics, pubsubName)
-		}
-	}
-	// 5. cache the result
-	m.topicPerComponent = comp2Topic
-	return comp2Topic, nil
-}
-
-func (m *MosnRuntime) publishMessageGRPC(ctx context.Context, msg *pubsub.NewMessage) error {
-	// 1. Unmarshal to cloudEvent model
-	var cloudEvent map[string]interface{}
-	err := m.json.Unmarshal(msg.Data, &cloudEvent)
-	if err != nil {
-		log.DefaultLogger.Debugf("[runtime]error deserializing cloud events proto: %s", err)
-		return err
-	}
-
-	// 2. Drop msg if the current cloud event has expired
-	if pubsub.HasExpired(cloudEvent) {
-		log.DefaultLogger.Warnf("[runtime]dropping expired pub/sub event %v as of %v", cloudEvent[pubsub.IDField].(string), cloudEvent[pubsub.ExpirationField].(string))
-		return nil
-	}
-
-	// 3. Convert to proto domain struct
-	envelope := &runtimev1pb.TopicEventRequest{
-		Id:              cloudEvent[pubsub.IDField].(string),
-		Source:          cloudEvent[pubsub.SourceField].(string),
-		DataContentType: cloudEvent[pubsub.DataContentTypeField].(string),
-		Type:            cloudEvent[pubsub.TypeField].(string),
-		SpecVersion:     cloudEvent[pubsub.SpecVersionField].(string),
-		Topic:           msg.Topic,
-		PubsubName:      msg.Metadata[Metadata_key_pubsubName],
-	}
-
-	// set data field
-	if data, ok := cloudEvent[pubsub.DataBase64Field]; ok && data != nil {
-		decoded, decodeErr := base64.StdEncoding.DecodeString(data.(string))
-		if decodeErr != nil {
-			log.DefaultLogger.Debugf("unable to base64 decode cloudEvent field data_base64: %s", decodeErr)
-			return err
-		}
-
-		envelope.Data = decoded
-	} else if data, ok := cloudEvent[pubsub.DataField]; ok && data != nil {
-		envelope.Data = nil
-
-		if contenttype.IsStringContentType(envelope.DataContentType) {
-			envelope.Data = []byte(data.(string))
-		} else if contenttype.IsJSONContentType(envelope.DataContentType) {
-			envelope.Data, _ = m.json.Marshal(data)
-		}
-	}
-	// TODO tracing
-
-	// 4. Call appcallback
-	clientV1 := runtimev1pb.NewAppCallbackClient(m.AppCallbackConn)
-	res, err := clientV1.OnTopicEvent(ctx, envelope)
-
-	// 5. Check result
-	return retryStrategy(err, res, cloudEvent)
-}
-
-// retryStrategy returns error when the message should be redelivered
-func retryStrategy(err error, res *runtimev1pb.TopicEventResponse, cloudEvent map[string]interface{}) error {
-	if err != nil {
-		errStatus, hasErrStatus := status.FromError(err)
-		if hasErrStatus && (errStatus.Code() == codes.Unimplemented) {
-			// DROP
-			log.DefaultLogger.Warnf("[runtime]non-retriable error returned from app while processing pub/sub event %v: %s", cloudEvent[pubsub.IDField].(string), err)
-			return nil
-		}
-
-		err = errors.New(fmt.Sprintf("error returned from app while processing pub/sub event %v: %s", cloudEvent[pubsub.IDField].(string), err))
-		log.DefaultLogger.Debugf("%s", err)
-		// on error from application, return error for redelivery of event
-		return err
-	}
-
-	switch res.GetStatus() {
-	case runtimev1pb.TopicEventResponse_SUCCESS:
-		// on uninitialized status, this is the case it defaults to as an uninitialized status defaults to 0 which is
-		// success from protobuf definition
-		return nil
-	case runtimev1pb.TopicEventResponse_RETRY:
-		return errors.New(fmt.Sprintf("RETRY status returned from app while processing pub/sub event %v", cloudEvent[pubsub.IDField].(string)))
-	case runtimev1pb.TopicEventResponse_DROP:
-		log.DefaultLogger.Warnf("[runtime]DROP status returned from app while processing pub/sub event %v", cloudEvent[pubsub.IDField].(string))
-		return nil
-	}
-	// Consider unknown status field as error and retry
-	return errors.New(fmt.Sprintf("unknown status returned from app while processing pub/sub event %v: %v", cloudEvent[pubsub.IDField].(string), res.GetStatus()))
 }
 
 func (m *MosnRuntime) initAppCallbackConnection() error {
@@ -544,18 +577,190 @@ func (m *MosnRuntime) initAppCallbackConnection() error {
 	if m.runtimeConfig == nil || m.runtimeConfig.AppManagement.GrpcCallbackPort == 0 {
 		return nil
 	}
+	// get callback address
+	host := m.runtimeConfig.AppManagement.GrpcCallbackHost
+	if host == "" {
+		host = "127.0.0.1"
+	}
 	port := m.runtimeConfig.AppManagement.GrpcCallbackPort
+	address := fmt.Sprintf("%v:%v", host, port)
 	opts := []rawGRPC.DialOption{
 		rawGRPC.WithInsecure(),
 	}
 	// dial
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
-	conn, err := rawGRPC.DialContext(ctx, fmt.Sprintf("127.0.0.1:%v", port), opts...)
+	conn, err := rawGRPC.DialContext(ctx, address, opts...)
 	if err != nil {
-		log.DefaultLogger.Warnf("[runtime]failed to init callback client at port %v : %s", port, err)
+		log.DefaultLogger.Warnf("[runtime]failed to init callback client to address %v : %s", address, err)
 		return err
 	}
 	m.AppCallbackConn = conn
+	return nil
+}
+
+func (m *MosnRuntime) initOutputBinding(factorys ...*mbindings.OutputBindingFactory) error {
+	log.DefaultLogger.Infof("[runtime] start initializing OutputBinding components")
+	// 1. register all factory methods.
+	m.bindingsRegistry.RegisterOutputBinding(factorys...)
+	// 2. loop initializing
+	for name, config := range m.runtimeConfig.Bindings {
+		// 2.1. create the component
+		comp, err := m.bindingsRegistry.CreateOutputBinding(config.Type)
+		if err != nil {
+			m.errInt(err, "create outbinding component %s failed", name)
+			return err
+		}
+		//inject secret to component
+		if config.Metadata, err = m.Injector.InjectSecretRef(config.SecretRef, config.Metadata); err != nil {
+			return err
+		}
+		//inject component
+		if err := m.initComponentInject(comp, config.ComponentRef); err != nil {
+			return err
+		}
+		// 2.2. init
+		if err := comp.Init(bindings.Metadata{Name: name, Properties: config.Metadata}); err != nil {
+			m.errInt(err, "init outbinding component %s failed", name)
+			return err
+		}
+		// 2.3. put it into the runtime component pool
+		m.outputBindings[name] = comp
+		m.storeDynamicComponent(lifecycle.KindBinding, name, comp)
+	}
+	return nil
+}
+
+// TODO: implement initInputBinding
+func (m *MosnRuntime) initInputBinding(factorys ...*mbindings.InputBindingFactory) error {
+	return nil
+}
+
+func (m *MosnRuntime) initSecretStores(factorys ...*msecretstores.SecretStoresFactory) error {
+	log.DefaultLogger.Infof("[runtime] start initializing SecretStores components")
+	// 1. register all factory methods.
+	m.secretStoresRegistry.Register(factorys...)
+	// 2. loop initializing
+	for name, config := range m.runtimeConfig.SecretStoresManagement {
+		// 2.1. create the component
+		comp, err := m.secretStoresRegistry.Create(config.Type)
+		if err != nil {
+			m.errInt(err, "create secretStore component %s failed", name)
+			return err
+		}
+		//inject component
+		if err := m.initComponentInject(comp, config.ComponentRef); err != nil {
+			return err
+		}
+		// 2.2. init
+		if err := comp.Init(secretstores.Metadata{Properties: config.Metadata}); err != nil {
+			m.errInt(err, "init secretStore component %s failed", name)
+			return err
+		}
+
+		// 2.3. save runtime related configs
+		m.secretStores[name] = comp
+		m.storeDynamicComponent(lifecycle.KindSecret, name, comp)
+	}
+	return nil
+}
+
+func (m *MosnRuntime) AppendInitRuntimeStage(f initRuntimeStage) {
+	if f == nil || m.started {
+		log.DefaultLogger.Errorf("[runtime] invalid initRuntimeStage or already started")
+		return
+	}
+	m.initRuntimeStages = append(m.initRuntimeStages, f)
+}
+
+func (m *MosnRuntime) initRuntime(r *runtimeOptions) error {
+	st := time.Now()
+	// check default handler
+	if len(m.initRuntimeStages) == 0 {
+		m.initRuntimeStages = append(m.initRuntimeStages, DefaultInitRuntimeStage)
+	}
+	// do initialization
+	for _, f := range m.initRuntimeStages {
+		err := f(r, m)
+		if err != nil {
+			return err
+		}
+	}
+
+	log.DefaultLogger.Infof("[runtime] initRuntime stages cost: %v", time.Since(st))
+	return nil
+}
+
+func (m *MosnRuntime) SetCustomComponent(kind string, name string, component custom.Component) {
+	if _, ok := m.customComponent[kind]; !ok {
+		m.customComponent[kind] = make(map[string]custom.Component)
+	}
+	m.customComponent[kind][name] = component
+}
+
+func (m *MosnRuntime) initCustomComponents(kind2factorys map[string][]*custom.ComponentFactory) error {
+	log.DefaultLogger.Infof("[runtime] start initializing custom components")
+	// loop all configured custom components.
+	for kind, name2Config := range m.runtimeConfig.CustomComponent {
+		factorys, ok := kind2factorys[kind]
+		if !ok || len(factorys) == 0 {
+			log.DefaultLogger.Errorf("[runtime] Your required component kind %s is not supported.", kind)
+			continue
+		}
+		// register all the factorys
+		m.customComponentRegistry.Register(kind, factorys...)
+		// loop initializing component instances
+		for name, config := range name2Config {
+			// create the component
+			comp, err := m.customComponentRegistry.Create(kind, config.Type)
+			if err != nil {
+				m.errInt(err, "create custom component %s failed", name)
+				return err
+			}
+			//inject secret to component
+			if config.Metadata, err = m.Injector.InjectSecretRef(config.SecretRef, config.Metadata); err != nil {
+				return err
+			}
+			//inject component
+			if err := m.initComponentInject(comp, config.ComponentRef); err != nil {
+				return err
+			}
+			// init
+			if err := comp.Initialize(context.TODO(), config); err != nil {
+				m.errInt(err, "init custom component %s failed", name)
+				return err
+			}
+			// initialization finish
+			m.SetCustomComponent(kind, name, comp)
+			m.storeDynamicComponent(fmt.Sprintf("%s.%s", lifecycle.KindCustom, kind), name, comp)
+		}
+
+	}
+
+	return nil
+}
+
+func (m *MosnRuntime) initComponentInject(comp interface{}, config *refconfig.ComponentRefConfig) error {
+	if setComp, ok := comp.(common.SetComponent); ok {
+		configRef, err := m.Injector.GetConfigStore(config)
+		if err != nil {
+			return err
+		}
+		if configRef != nil {
+			if err = setComp.SetConfigStore(configRef); err != nil {
+				return err
+			}
+		}
+
+		secretRef, err := m.Injector.GetSecretStore(config)
+		if err != nil {
+			return err
+		}
+		if secretRef != nil {
+			if err = setComp.SetSecretStore(secretRef); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }

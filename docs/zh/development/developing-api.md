@@ -73,8 +73,8 @@ A: **本规范只限制“新增Layotto API的pr需要有哪些东西”（比�
 #### 2.3.1. Quick start
 需要有：
 
-- what 这API是干嘛的
-- what 这个quickstart是干嘛的，想实现啥效果，最好有个图解释下
+- 这API是干嘛的
+- 这个quickstart是干嘛的，想实现啥效果，最好有个图解释下
 - 操作步骤
 
 正例：[Dapr pub-sub quickstart](https://github.com/dapr/quickstarts/tree/v1.0.0/pub-sub) 在操作之前贴图解释下要做什么事情
@@ -108,6 +108,7 @@ A: **本规范只限制“新增Layotto API的pr需要有哪些东西”（比�
 列出来有哪些接口，一方面省的用户自己去翻proto、不知道哪些是相关API,一方面避免用户产生"这项目连接口文档都没有？！"的反感
 - 关于接口的出入参：拿proto注释当接口文档  
 考虑到接口文档用中英文写要写两份、时间长了还有可能和代码不一致，因此建议不写接口文档，直接把proto注释写的足够详细、当接口文档。例如：
+
 ```protobuf
 // GetStateRequest is the message to get key-value states from specific state store.
 message GetStateRequest {

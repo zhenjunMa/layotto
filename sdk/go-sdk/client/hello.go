@@ -18,6 +18,7 @@ package client
 
 import (
 	"context"
+
 	runtimev1pb "mosn.io/layotto/spec/proto/runtime/v1"
 )
 
@@ -30,7 +31,9 @@ type SayHelloResp struct {
 }
 
 func (c *GRPCClient) SayHello(ctx context.Context, in *SayHelloRequest) (*SayHelloResp, error) {
-	req := &runtimev1pb.SayHelloRequest{ServiceName: in.ServiceName}
+	req := &runtimev1pb.SayHelloRequest{
+		ServiceName: in.ServiceName,
+	}
 	resp, err := c.protoClient.SayHello(ctx, req)
 	if err != nil {
 		return nil, err

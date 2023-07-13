@@ -15,3 +15,21 @@
  */
 
 package wasm
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"mosn.io/proxy-wasm-go-host/proxywasm/common"
+)
+
+func TestMapEncodeAndDecode(t *testing.T) {
+	m := map[string]string{
+		"a": "a",
+		"b": "b",
+		"c": "c",
+	}
+	b := common.EncodeMap(m)
+	n := common.DecodeMap(b)
+	assert.Equal(t, m, n)
+}

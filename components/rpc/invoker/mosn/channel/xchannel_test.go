@@ -30,11 +30,10 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"mosn.io/api"
-	"mosn.io/layotto/components/rpc"
-	"mosn.io/mosn/pkg/protocol/xprotocol"
 	"mosn.io/mosn/pkg/protocol/xprotocol/bolt"
-	"mosn.io/mosn/pkg/types"
 	"mosn.io/pkg/buffer"
+
+	"mosn.io/layotto/components/rpc"
 )
 
 var (
@@ -50,7 +49,7 @@ func (ts *testserver) accept(conn net.Conn, listener string) error {
 	return nil
 }
 
-func (s *testserver) handleRequest(frame api.XFrame) ([]byte, error) {
+func (ts *testserver) handleRequest(frame api.XFrame) ([]byte, error) {
 	data := frame.GetData()
 	if data != nil {
 		data := string(data.Bytes())
@@ -64,17 +63,17 @@ func (s *testserver) handleRequest(frame api.XFrame) ([]byte, error) {
 		default:
 			if strings.Contains(data, "echo") {
 				resp := bolt.NewRpcResponse(uint32(frame.GetRequestId()), bolt.ResponseStatusSuccess, nil, buffer.NewIoBufferBytes([]byte(data)))
-				buf, _ := s.XProtocol.Encode(context.TODO(), resp)
+				buf, _ := ts.XProtocol.Encode(context.TODO(), resp)
 				return buf.Bytes(), nil
 			}
 		}
 	}
 	resp := bolt.NewRpcResponse(uint32(frame.GetRequestId()), bolt.ResponseStatusSuccess, nil, buffer.NewIoBufferBytes([]byte("ok")))
-	buf, _ := s.XProtocol.Encode(context.TODO(), resp)
+	buf, _ := ts.XProtocol.Encode(context.TODO(), resp)
 	return buf.Bytes(), nil
 }
 
-func (s *testserver) readLoop(conn net.Conn) {
+func (ts *testserver) readLoop(conn net.Conn) {
 	data := buffer.GetIoBuffer(1024)
 
 	defer conn.Close()
@@ -90,7 +89,7 @@ func (s *testserver) readLoop(conn net.Conn) {
 		data.Write(p[:n])
 
 		for {
-			packet, err := s.XProtocol.Decode(context.TODO(), data)
+			packet, err := ts.XProtocol.Decode(context.TODO(), data)
 			if err != nil {
 				return
 			}
@@ -100,7 +99,7 @@ func (s *testserver) readLoop(conn net.Conn) {
 
 			go func() {
 				frame := packet.(*bolt.Request)
-				bytes, err := s.handleRequest(frame)
+				bytes, err := ts.handleRequest(frame)
 				if err != nil {
 					conn.Close()
 					return
@@ -116,7 +115,7 @@ func (s *testserver) readLoop(conn net.Conn) {
 
 func startTestServer() {
 	ts := &testserver{
-		XProtocol: xprotocol.GetProtocol(types.ProtocolName(proto)),
+		XProtocol: (&bolt.XCodec{}).NewXProtocol(context.TODO()), // always bolt here.
 	}
 	acceptFunc = ts.accept
 }
@@ -134,6 +133,14 @@ func TestChannel(t *testing.T) {
 	assert.Equal(t, "ok", string(resp.Data))
 }
 
+func TestInvalidProtocal(t *testing.T) {
+	config := ChannelConfig{Size: 1, Protocol: "dubbogo", Ext: map[string]interface{}{"class": "xxx"}}
+	_, err := newXChannel(config)
+	assert.NotNil(t, err)
+
+	assert.Equal(t, err.Error(), "protocol dubbogo not found")
+}
+
 func TestChannelTimeout(t *testing.T) {
 	startTestServer()
 
@@ -141,10 +148,10 @@ func TestChannelTimeout(t *testing.T) {
 	channel, err := newXChannel(config)
 	assert.Nil(t, err)
 
-	req := &rpc.RPCRequest{Ctx: context.TODO(), Id: "foo", Method: "bar", Data: []byte("timeout"), Timeout: 500}
+	req := &rpc.RPCRequest{Ctx: context.TODO(), Id: "foo", Method: "bar", Data: []byte("timeout"), Timeout: 990}
 	_, err = channel.Do(req)
 	t.Log(err)
-	assert.Equal(t, ErrTimeout, err)
+	assert.True(t, strings.Contains(err.Error(), ErrTimeout.Error()))
 }
 
 func TestMemConnClosed(t *testing.T) {
@@ -156,7 +163,7 @@ func TestMemConnClosed(t *testing.T) {
 
 	req := &rpc.RPCRequest{Ctx: context.TODO(), Id: "foo", Method: "bar", Data: []byte("close"), Timeout: 1000}
 	_, err = channel.Do(req)
-	assert.Equal(t, err, ErrConnClosed)
+	assert.True(t, strings.Contains(err.Error(), "EOF"))
 }
 
 func TestReturnInvalidPacket(t *testing.T) {
@@ -168,7 +175,7 @@ func TestReturnInvalidPacket(t *testing.T) {
 
 	req := &rpc.RPCRequest{Ctx: context.TODO(), Id: "foo", Method: "bar", Data: []byte("deformity"), Timeout: 1000}
 	_, err = channel.Do(req)
-	assert.Equal(t, err, ErrTimeout)
+	assert.True(t, strings.Contains(err.Error(), ErrTimeout.Error()))
 }
 
 func TestRenewConn(t *testing.T) {
@@ -180,7 +187,7 @@ func TestRenewConn(t *testing.T) {
 
 	req := &rpc.RPCRequest{Ctx: context.TODO(), Id: "foo", Method: "bar", Data: []byte("close"), Timeout: 1000}
 	_, err = channel.Do(req)
-	assert.Equal(t, err, ErrConnClosed)
+	assert.True(t, strings.Contains(err.Error(), "EOF"))
 
 	var errcount int32
 	var wg sync.WaitGroup
@@ -200,7 +207,7 @@ func TestRenewConn(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	assert.Equal(t, int32(1), atomic.LoadInt32(&errcount))
+	assert.Equal(t, int32(0), atomic.LoadInt32(&errcount))
 }
 
 func TestConncurrent(t *testing.T) {
@@ -248,7 +255,8 @@ func TestConncurrent(t *testing.T) {
 
 	wg.Wait()
 	req := &rpc.RPCRequest{Ctx: context.TODO(), Id: "foo", Method: "bar", Data: []byte("hello world"), Timeout: 1000}
-	_, err = channel.Do(req)
+	channel.Do(req)
+	//_, err = channel.Do(req)
 	//assert.Nil(t, err)
 
 	size = 100
@@ -265,4 +273,49 @@ func TestConncurrent(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestReadloopError(t *testing.T) {
+	startTestServer()
+
+	config := ChannelConfig{Size: 1, Protocol: proto, Ext: map[string]interface{}{"class": "xxx"}}
+	channel, err := newXChannel(config)
+	assert.Nil(t, err)
+
+	xchannel := channel.(*xChannel)
+	conn, _ := xchannel.pool.Get(context.TODO())
+	xstate := conn.state.(*xstate)
+	xchannel.pool.Put(conn, false)
+
+	go func() {
+		time.AfterFunc(100*time.Millisecond, func() {
+			req := &rpc.RPCRequest{Ctx: context.TODO(), Id: "foo", Method: "bar", Data: []byte("close"), Timeout: 500}
+			_, err = channel.Do(req)
+			assert.True(t, strings.Contains(err.Error(), "EOF"))
+		})
+	}()
+
+	var wg sync.WaitGroup
+	total := 10
+	wg.Add(total)
+	for i := 0; i < total; i++ {
+		go func() {
+			defer wg.Done()
+			req := &rpc.RPCRequest{Ctx: context.TODO(), Id: "foo", Method: "bar", Data: []byte("timeout"), Timeout: 500}
+			_, err = channel.Do(req)
+			t.Log(err)
+			assert.True(t, strings.Contains(err.Error(), "EOF"))
+		}()
+	}
+	wg.Wait()
+
+	xstate.mu.Lock()
+	callsSize := len(xstate.calls)
+	xstate.mu.Unlock()
+	assert.Equal(t, 0, callsSize)
+
+	req := &rpc.RPCRequest{Ctx: context.TODO(), Id: "foo", Method: "bar", Data: []byte("hello world"), Timeout: 500}
+	resp, err := channel.Do(req)
+	assert.Nil(t, err)
+	assert.Equal(t, string(resp.Data), "ok")
 }

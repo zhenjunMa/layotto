@@ -2,22 +2,32 @@
 **配置文件结构**
 
 json配置文件有如下结构：
+
 ```json
 "state": {
-  "<STORE NAME>": {
-    "metadata": {
-      "<KEY>": "<VALUE>",
-      "<KEY>": "<VALUE>"
+    "<Component A Name>": {
+    "type":"<Component A Type>",
+      "metadata": {
+        "<KEY>": "<VALUE>",
+        "<KEY>": "<VALUE>"
+      }
+    },
+    "<Component B Name>": {
+      "type":"<Component B Type>",
+      "metadata": {
+        "<KEY>": "<VALUE>",
+        "<KEY>": "<VALUE>"
+      }
     }
-  }
 }
 ```
 
-您可以在metadata里配置组件关心的key/value配置。例如[redis组件的配置](https://github.com/mosn/layotto/blob/main/configs/config_state_redis.json) 如下：
+您可以在metadata里配置组件关心的key/value配置。例如[redis组件的配置](https://github.com/mosn/layotto/blob/main/configs/config_redis.json) 如下：
 
 ```json
 "state": {
-  "redis": {
+  "state_demo": {
+    "type": "redis",
     "metadata": {
       "redisHost": "localhost:6380",
       "redisPassword": ""
@@ -38,11 +48,11 @@ json配置文件有如下结构：
 
 keyPrefix支持以下键前缀策略:
 
-* **`appid`** - 这是默认策略。用户传入的key最终将被保存为`当前appid||key`
+* **`appid`** - 用户传入的key最终将被保存为`当前appid||key`
 
 * **`name`** - 此设置使用组件名称作为前缀。 比如redis组件会将用户传入的key存储为`redis||key`
 
-* **`none`** - 此设置不使用前缀。
+* **`none`** - 不给 key 添加前缀。**这是默认策略。**
 
 *  其他任意不含||的字符串.比如keyPrefix配置成"abc",那么用户传入的key最终将被保存为`abc||key`
 

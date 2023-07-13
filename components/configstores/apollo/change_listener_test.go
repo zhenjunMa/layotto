@@ -21,12 +21,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/apolloconfig/agollo/v4/storage"
 	"github.com/stretchr/testify/assert"
-	"github.com/zouyx/agollo/v4/storage"
+
 	"mosn.io/layotto/components/configstores"
 )
 
-const testAppId = "test_app"
+const (
+	testAppId     = "test_app"
+	testStoreName = "test_storename"
+)
 
 type MockRepo struct {
 	c *ConfigStore
@@ -44,6 +48,10 @@ func (m *MockRepo) GetAppId() string {
 	return testAppId
 }
 
+func (m *MockRepo) GetStoreName() string {
+	return testStoreName
+}
+
 const ns = "application"
 
 func setupChangeListener() *changeListener {
@@ -53,7 +61,7 @@ func setupChangeListener() *changeListener {
 	return newChangeListener(mockRepo)
 }
 
-//Test modified
+// Test modified
 func Test_changeListener_OnChange(t *testing.T) {
 	lis := setupChangeListener()
 	ch := make(chan *configstores.SubscribeResp)
@@ -68,7 +76,7 @@ func Test_changeListener_OnChange(t *testing.T) {
 	go func() {
 		select {
 		case c2 := <-ch:
-			assert.Equal(t, c2.StoreName, "apollo")
+			assert.Equal(t, c2.StoreName, testStoreName)
 			assert.Equal(t, c2.AppId, testAppId)
 			assert.True(t, len(c2.Items) == 1)
 			assert.True(t, c2.Items[0].Key == "key1")
@@ -164,6 +172,7 @@ func Test_changeListener_writeToClosedChan(t *testing.T) {
 		Changes: changes,
 	}
 	event.Namespace = ns
+	// execute
 	lis.OnChange(event)
 	//	 assert no panic
 }

@@ -19,14 +19,15 @@ package main
 import (
 	"context"
 	"fmt"
-	runtimev1pb "mosn.io/layotto/spec/proto/runtime/v1"
 	"time"
+
+	runtimev1pb "mosn.io/layotto/spec/proto/runtime/v1"
 
 	"google.golang.org/grpc"
 )
 
 func main() {
-	conn, err := grpc.Dial("127.0.0.1:34904", grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(time.Second))
+	conn, err := grpc.Dial("127.0.0.1:34904", grpc.WithInsecure(), grpc.WithBlock(), grpc.WithTimeout(2*time.Second))
 	if err != nil {
 		panic(err)
 	}

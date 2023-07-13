@@ -19,7 +19,9 @@ package health
 import (
 	"context"
 	"errors"
+
 	"mosn.io/layotto/pkg/actuator"
+	"mosn.io/layotto/pkg/filter/stream/common/http"
 )
 
 const (
@@ -36,6 +38,7 @@ var (
 	serviceInitError = errors.New("service is initializing")
 )
 
+// init health Endpoint.
 func init() {
 	actuator.GetDefault().AddEndpoint(health_key, NewEndpoint())
 }
@@ -51,16 +54,16 @@ func NewEndpoint() *Endpoint {
 
 // Handle will check health status.The structure of the returned map is like:
 //
-// {
-//  "status": "DOWN",
-//  "components": {
-//    "readinessProbe": {
-//      "status": "DOWN",
-//      "details": {}
-//    }
-//  }
-// }
-func (e *Endpoint) Handle(ctx context.Context, params actuator.ParamsScanner) (map[string]interface{}, error) {
+//	{
+//	 "status": "DOWN",
+//	 "components": {
+//	   "readinessProbe": {
+//	     "status": "DOWN",
+//	     "details": {}
+//	   }
+//	 }
+//	}
+func (e *Endpoint) Handle(ctx context.Context, params http.ParamsScanner) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 	// 1. validate params
 	if params == nil || !params.HasNext() {
@@ -73,7 +76,7 @@ func (e *Endpoint) Handle(ctx context.Context, params actuator.ParamsScanner) (m
 	}
 	// 2. traverse the indicator chain
 	result[status_key] = UP
-	var resultErr error = nil
+	var resultErr error
 	components := make(map[string]Health)
 	result[components_key] = components
 	for k, idc := range m {

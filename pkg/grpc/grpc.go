@@ -18,24 +18,38 @@ package grpc
 
 import (
 	"google.golang.org/grpc"
-	runtimev1pb "mosn.io/layotto/spec/proto/runtime/v1"
 	mgrpc "mosn.io/mosn/pkg/filter/network/grpc"
+
+	"mosn.io/layotto/diagnostics"
 )
 
-func NewGrpcServer(opts ...Option) mgrpc.RegisteredServer {
+func NewGrpcServer(opts ...Option) (mgrpc.RegisteredServer, error) {
 	var o grpcOptions
 	for _, opt := range opts {
 		opt(&o)
 	}
 	srvMaker := NewDefaultServer
+	o.options = append(o.options, grpc.ChainUnaryInterceptor(diagnostics.UnaryInterceptorFilter))
+	o.options = append(o.options, grpc.ChainStreamInterceptor(diagnostics.StreamInterceptorFilter))
 	if o.maker != nil {
 		srvMaker = o.maker
 	}
-	return srvMaker(o.api, o.options...)
+	return srvMaker(o.apis, o.options...)
 }
 
-func NewDefaultServer(api API, opts ...grpc.ServerOption) mgrpc.RegisteredServer {
+func NewDefaultServer(apis []GrpcAPI, opts ...grpc.ServerOption) (mgrpc.RegisteredServer, error) {
+	return NewRawGrpcServer(apis, opts...)
+}
+
+func NewRawGrpcServer(apis []GrpcAPI, opts ...grpc.ServerOption) (*grpc.Server, error) {
 	s := grpc.NewServer(opts...)
-	runtimev1pb.RegisterRuntimeServer(s, api)
-	return s
+	var err error
+	// loop registering grpc api
+	for _, grpcAPI := range apis {
+		err = grpcAPI.Register(s)
+		if err != nil {
+			return s, err
+		}
+	}
+	return s, nil
 }

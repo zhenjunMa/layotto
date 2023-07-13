@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+
 	"mosn.io/layotto/components/rpc"
 )
 
@@ -32,7 +33,7 @@ func Test_beforeFactory_Create(t *testing.T) {
 		Id:      "1",
 		Timeout: 300,
 		Method:  "Hello",
-		Header:  make(map[string][]string, 0),
+		Header:  make(map[string][]string),
 	}
 	newReq, err := f(req)
 	assert.Nil(t, err)

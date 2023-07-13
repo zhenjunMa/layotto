@@ -18,21 +18,29 @@ package actuator
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"mosn.io/layotto/pkg/filter/stream/common/http"
 )
 
 type MockEndpoint struct {
 }
 
-func (m *MockEndpoint) Handle(ctx context.Context, params ParamsScanner) (map[string]interface{}, error) {
+func (m *MockEndpoint) Handle(ctx context.Context, params http.ParamsScanner) (map[string]interface{}, error) {
 	return nil, nil
 }
 
+// TestActuator test AddEndpoint and GetEndpoint.
 func TestActuator(t *testing.T) {
+	// get singleton Actuator
 	act := GetDefault()
+	// reset before test
+	act.AddEndpoint("health", nil)
+
 	endpoint, ok := act.GetEndpoint("health")
-	assert.False(t, ok)
+	assert.True(t, ok)
 	assert.Nil(t, endpoint)
 
 	act.AddEndpoint("", nil)
@@ -42,6 +50,10 @@ func TestActuator(t *testing.T) {
 
 	ep := &MockEndpoint{}
 	act.AddEndpoint("health", ep)
+	// reset
+	defer func() {
+		act.AddEndpoint("health", nil)
+	}()
 	endpoint, ok = act.GetEndpoint("health")
 	assert.True(t, ok)
 	assert.Equal(t, endpoint, ep)

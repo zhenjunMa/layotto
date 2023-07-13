@@ -17,10 +17,12 @@
 package pubsub
 
 import (
-	"github.com/dapr/components-contrib/pubsub"
-	"mosn.io/layotto/components/pkg/info"
 	"strings"
 	"testing"
+
+	"github.com/dapr/components-contrib/pubsub"
+
+	"mosn.io/layotto/components/pkg/info"
 )
 
 func TestNewRegistry(t *testing.T) {
@@ -32,7 +34,7 @@ func TestNewRegistry(t *testing.T) {
 	if _, err := r.Create("mock"); err != nil {
 		t.Fatalf("create mock store failed: %v", err)
 	}
-	if _, err := r.Create("not exists"); !strings.Contains(err.Error(), "not regsitered") {
+	if _, err := r.Create("not exists"); !strings.Contains(err.Error(), "not registered") {
 		t.Fatalf("create mock store failed: %v", err)
 	}
 }

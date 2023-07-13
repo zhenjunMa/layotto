@@ -24,12 +24,17 @@ const (
 	ErrPubsubCloudEventsSer     = "error when marshalling cloud event envelope for topic %s pubsub %s: %s"
 	ErrPubsubPublishMessage     = "error when publish to topic %s in pubsub %s: %s"
 	ErrPubsubCloudEventCreation = "cannot create cloudevent: %s"
+	// Http.
+	ErrNotFound             = "method %q is not found"
+	ErrMalformedRequest     = "failed deserializing HTTP body: %s"
+	ErrMalformedRequestData = "can't serialize request data field: %s"
 	// State
 	ErrStateStoresNotConfigured = "state store is not configured"
 	ErrStateStoreNotFound       = "state store %s is not found"
 	ErrStateGet                 = "fail to get %s from state store %s: %s"
 	ErrStateDelete              = "failed deleting state with key %s: %s"
 	ErrStateSave                = "failed saving state in state store %s: %s"
+	ErrStateQuery               = "failed query in state store %s: %s"
 	// StateTransaction
 	ErrStateStoreNotSupported     = "state store %s doesn't support transaction"
 	ErrNotSupportedStateOperation = "operation type %s not supported"
@@ -44,4 +49,14 @@ const (
 	ErrSequencerStoresNotConfigured = "Sequencer store is not configured"
 	ErrSequencerKeyEmpty            = "Key is empty in sequencer store %s"
 	ErrSequencerStoreNotFound       = "Sequencer store %s not found"
+
+	// Binding.
+	ErrInvokeOutputBinding = "error when invoke output binding %s: %s"
+
+	// Secret
+	ErrSecretStoreNotConfigured = "error when get secret but not find configured"
+	ErrSecretStoreNotFound      = "error when get secret but not find : %s"
+	ErrSecretGet                = "error when get secret : secret name => %s,store name =>%s,error => %s"
+	ErrBulkSecretGet            = "error when bulk get secret %s: %s"
+	ErrPermissionDenied         = "access denied by policy to get %s from %s"
 )

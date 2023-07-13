@@ -1,7 +1,7 @@
 # Redis
 
 ## metadata fields
-Example: configs/config_state_redis.json
+Example: configs/config_redis.json
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ Example: configs/config_state_redis.json
 If you want to run the redis demo, you need to start a Redis server with Docker first.
 
 command:
+
 ```shell
 docker pull redis:latest
 docker run -itd --name redis-test -p 6380:6379 redis

@@ -6,13 +6,14 @@ package spec.proto.runtime.v1;
 import "google/protobuf/empty.proto";
 
 option go_package = "mosn.io/layotto/spec/proto/runtime/v1;runtime";
+option java_outer_classname = "AppCallbackProto";
+option java_package = "spec.proto.runtime.v1";
 
+/* @exclude skip quickstart_generator */
 // AppCallback V1 allows user application to interact with runtime.
 // User application needs to implement AppCallback service if it needs to
 // receive message from runtime.
 service AppCallback {
-//  // Invokes service method with InvokeRequest.
-//  rpc OnInvoke (InvokeRequest) returns (InvokeResponse) {}
 
   // Lists all topics subscribed by this app.
   rpc ListTopicSubscriptions(google.protobuf.Empty) returns (ListTopicSubscriptionsResponse) {}
@@ -54,6 +55,9 @@ message TopicEventRequest {
 
   // The name of the pubsub the publisher sent to.
   string pubsub_name = 8;
+
+  // add a map to pass some extra properties.
+  map<string,string> metadata = 10;
 }
 
 // TopicEventResponse is response from app on published message

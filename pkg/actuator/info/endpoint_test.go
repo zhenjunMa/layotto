@@ -18,8 +18,9 @@ package info
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 type MockContributor struct {
@@ -35,6 +36,11 @@ func (m MockContributor) GetInfo() (info interface{}, err error) {
 func TestEndpoint_Handle(t *testing.T) {
 	ep := NewEndpoint()
 	handle, err := ep.Handle(context.Background(), nil)
+	assert.True(t, err == nil)
+	assert.True(t, len(handle) == 0)
+
+	AddInfoContributorFunc("test", nil)
+	handle, err = ep.Handle(context.Background(), nil)
 	assert.True(t, err == nil)
 	assert.True(t, len(handle) == 0)
 

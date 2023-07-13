@@ -19,16 +19,19 @@ package tcpcopy
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"sync"
+	"sync/atomic"
+
 	"mosn.io/api"
+	"mosn.io/mosn/pkg/log"
+	"mosn.io/mosn/pkg/types"
+	"mosn.io/pkg/variable"
+
 	"mosn.io/layotto/pkg/filter/network/tcpcopy/model"
 	"mosn.io/layotto/pkg/filter/network/tcpcopy/persistence"
 	"mosn.io/layotto/pkg/filter/network/tcpcopy/strategy"
 	_type "mosn.io/layotto/pkg/filter/network/tcpcopy/type"
-	"mosn.io/mosn/pkg/log"
-	"mosn.io/mosn/pkg/types"
-	"strconv"
-	"sync"
-	"sync/atomic"
 )
 
 var lock sync.Mutex
@@ -92,7 +95,7 @@ func UploadPortraitData(businessType _type.BusinessType, data interface{}, ctx c
 
 	// Persistent user reported data
 	var dataBytes []byte
-	var err error = nil
+	var err error
 	tmp := make(map[string]string)
 	if _, ok := data.(api.HeaderMap); ok {
 		data.(api.HeaderMap).Range(func(key, value string) bool {
@@ -110,9 +113,11 @@ func UploadPortraitData(businessType _type.BusinessType, data interface{}, ctx c
 	}
 	port := ""
 	if ctx != nil {
-		listener_port := ctx.Value(types.ContextKeyListenerPort)
-		if listener_port != nil {
-			port = strconv.Itoa(listener_port.(int))
+		listener_port, err := variable.Get(ctx, types.VariableListenerPort)
+		if err == nil {
+			if portInt, ok := listener_port.(int); ok {
+				port = strconv.Itoa(portInt)
+			}
 		}
 	}
 

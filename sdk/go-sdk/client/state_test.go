@@ -1,3 +1,15 @@
+// Copyright 2021 Layotto Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 // CODE ATTRIBUTION: https://github.com/dapr/go-sdk
 // Modified the import package to use layotto's pb
 // We use same sdk code with Dapr's for state API because we want to keep compatible with Dapr state API
@@ -9,8 +21,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
 	v1 "mosn.io/layotto/spec/proto/runtime/v1"
 )
+
+const test = "test"
 
 func TestTypes(t *testing.T) {
 	var op OperationType = -1
@@ -22,7 +37,7 @@ func TestTypes(t *testing.T) {
 }
 
 func TestDurationConverter(t *testing.T) {
-	d := time.Duration(10 * time.Second)
+	d := 10 * time.Second
 	pd := toProtoDuration(d)
 	assert.NotNil(t, pd)
 	assert.Equal(t, pd.Seconds, int64(10))
@@ -42,8 +57,8 @@ func TestStateOptionsConverter(t *testing.T) {
 // go test -timeout 30s ./client -count 1 -run ^TestSaveState$
 func TestSaveState(t *testing.T) {
 	ctx := context.Background()
-	data := "test"
-	store := "test"
+	data := test
+	store := test
 	key := "key1"
 
 	t.Run("save data", func(t *testing.T) {
@@ -90,8 +105,8 @@ func TestSaveState(t *testing.T) {
 // go test -timeout 30s ./client -count 1 -run ^TestDeleteState$
 func TestDeleteState(t *testing.T) {
 	ctx := context.Background()
-	data := "test"
-	store := "test"
+	data := test
+	store := test
 	key := "key1"
 
 	t.Run("delete not exist data", func(t *testing.T) {
@@ -168,8 +183,8 @@ func TestDeleteState(t *testing.T) {
 
 func TestDeleteBulkState(t *testing.T) {
 	ctx := context.Background()
-	data := "test"
-	store := "test"
+	data := test
+	store := test
 	keys := []string{"key1", "key2", "key3"}
 
 	t.Run("delete not exist data", func(t *testing.T) {
@@ -276,7 +291,7 @@ func TestDeleteBulkState(t *testing.T) {
 func TestStateTransactions(t *testing.T) {
 	ctx := context.Background()
 	data := `{ "message": "test" }`
-	store := "test"
+	store := test
 	meta := map[string]string{}
 	keys := []string{"k1", "k2", "k3"}
 	adds := make([]*StateOperation, 0)

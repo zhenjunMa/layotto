@@ -2,7 +2,7 @@
 
 ## 介绍
 
-当您按照quick start文档[通过Layotto调用apollo配置中心](zh/configuration/start-apollo.md)运行demo时，可能会注意到配置文件config_apollo.json中有这么一段配置：
+当您按照quick start文档[通过Layotto调用apollo配置中心](zh/start/configuration/start-apollo.md)运行demo时，可能会注意到配置文件config_apollo.json中有这么一段配置：
 
 ```json
                 {
@@ -17,6 +17,7 @@
                     }
                   }
 ```
+
 这段配置的含义是启动时加载tcpcopy插件，进行tcp流量dump。
 
 开启该配置后，当Layotto接到请求，如果判断满足流量dump的条件，就会把请求的二进制数据写到本地文件系统。

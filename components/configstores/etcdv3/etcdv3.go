@@ -1,24 +1,46 @@
+// Copyright 2021 Layotto Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package etcdv3
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"mosn.io/pkg/utils"
+
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"mosn.io/layotto/components/configstores"
 	"mosn.io/pkg/log"
+
+	"mosn.io/layotto/components/configstores"
+	"mosn.io/layotto/components/trace"
+)
+
+const (
+	defaultGroup = "default"
+	defaultLabel = "default"
 )
 
 type EtcdV3ConfigStore struct {
-	name   string
 	client *clientv3.Client
 	sync.RWMutex
 	subscribeKey map[string]string
 	appIdKey     string
+	storeName    string
 	// cancel is the func, call cancel will stop watching on the appIdKey
 	cancel       context.CancelFunc
 	watchStarted bool
@@ -26,18 +48,18 @@ type EtcdV3ConfigStore struct {
 }
 
 func (c *EtcdV3ConfigStore) GetDefaultGroup() string {
-	return "default"
+	return defaultGroup
 }
 
 func (c *EtcdV3ConfigStore) GetDefaultLabel() string {
-	return "default"
+	return defaultLabel
 }
 
 func NewStore() configstores.Store {
 	return &EtcdV3ConfigStore{subscribeKey: make(map[string]string), watchRespCh: make(chan *configstores.SubscribeResp)}
 }
 
-//Init init the configuration store.
+// Init init the configuration store.
 func (c *EtcdV3ConfigStore) Init(config *configstores.StoreConfig) error {
 	t, err := strconv.Atoi(config.TimeOut)
 	if err != nil {
@@ -48,6 +70,7 @@ func (c *EtcdV3ConfigStore) Init(config *configstores.StoreConfig) error {
 		Endpoints:   config.Address,
 		DialTimeout: time.Duration(t) * time.Second,
 	})
+	c.storeName = config.StoreName
 	return err
 }
 
@@ -118,6 +141,7 @@ func (c *EtcdV3ConfigStore) Get(ctx context.Context, req *configstores.GetReques
 		targetString[configstores.Key] = key
 		res = append(res, c.GetItemsFromAllKeys(keyValues.Kvs, targetString)...)
 	}
+	trace.SetExtraComponentInfo(ctx, fmt.Sprintf("method: %+v, store: %+v", "Get", "etcd"))
 	return res, nil
 }
 
@@ -149,7 +173,7 @@ func (c *EtcdV3ConfigStore) Delete(ctx context.Context, req *configstores.Delete
 }
 
 func (c *EtcdV3ConfigStore) processWatchResponse(resp *clientv3.WatchResponse) {
-	res := &configstores.SubscribeResp{StoreName: "etcd", AppId: c.appIdKey}
+	res := &configstores.SubscribeResp{StoreName: c.storeName, AppId: c.appIdKey}
 	item := &configstores.ConfigurationItem{}
 	if len(resp.Events) == 0 {
 		return
@@ -192,7 +216,9 @@ func (c *EtcdV3ConfigStore) Subscribe(req *configstores.SubscribeReq, ch chan *c
 		c.subscribeKey[s] = key
 	}
 	if !c.watchStarted {
-		go c.watch()
+		utils.GoWithRecover(func() {
+			c.watch()
+		}, nil)
 		c.watchStarted = true
 	}
 	return nil

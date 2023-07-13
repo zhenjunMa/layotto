@@ -18,15 +18,61 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"mosn.io/layotto/components/sequencer"
-	runtime_sequencer "mosn.io/layotto/pkg/runtime/sequencer"
+	_ "net/http/pprof"
 	"os"
 	"strconv"
 	"time"
 
-	"mosn.io/layotto/components/configstores/etcdv3"
+	"mosn.io/layotto/components/cryption"
+	"mosn.io/layotto/components/cryption/aliyun"
+
+	"mosn.io/layotto/pkg/grpc/lifecycle"
+
+	"mosn.io/layotto/components/oss"
+
+	huaweicloud_oss "mosn.io/layotto/components/oss/huaweicloud"
+
+	aws_oss "mosn.io/layotto/components/oss/aws"
+
+	aliyun_oss "mosn.io/layotto/components/oss/aliyun"
+
+	ceph_oss "mosn.io/layotto/components/oss/ceph"
+
+	"mosn.io/mosn/pkg/istio"
+
+	aliyun_file "mosn.io/layotto/components/file/aliyun"
+
+	"github.com/dapr/components-contrib/secretstores"
+	"github.com/dapr/components-contrib/secretstores/aws/parameterstore"
+	"github.com/dapr/components-contrib/secretstores/aws/secretmanager"
+	"github.com/dapr/components-contrib/secretstores/azure/keyvault"
+	gcp_secretmanager "github.com/dapr/components-contrib/secretstores/gcp/secretmanager"
+	"github.com/dapr/components-contrib/secretstores/hashicorp/vault"
+	sercetstores_kubernetes "github.com/dapr/components-contrib/secretstores/kubernetes"
+	secretstore_env "github.com/dapr/components-contrib/secretstores/local/env"
+	secretstore_file "github.com/dapr/components-contrib/secretstores/local/file"
+
+	"mosn.io/layotto/components/file/aws"
+	"mosn.io/layotto/components/file/minio"
+	"mosn.io/layotto/components/file/qiniu"
+	"mosn.io/layotto/components/file/tencentcloud"
+
+	"mosn.io/layotto/pkg/grpc/default_api"
+	secretstores_loader "mosn.io/layotto/pkg/runtime/secretstores"
+
+	"mosn.io/layotto/components/file/local"
+	mock_state "mosn.io/layotto/pkg/mock/components/state"
+
+	dbindings "github.com/dapr/components-contrib/bindings"
+	"github.com/dapr/components-contrib/bindings/http"
 	"mosn.io/pkg/log"
+
+	"mosn.io/layotto/components/configstores/etcdv3"
+	"mosn.io/layotto/components/configstores/nacos"
+	"mosn.io/layotto/components/file"
+	"mosn.io/layotto/components/sequencer"
+	"mosn.io/layotto/pkg/runtime/bindings"
+	runtime_sequencer "mosn.io/layotto/pkg/runtime/sequencer"
 
 	// Hello
 	"mosn.io/layotto/components/hello"
@@ -40,9 +86,9 @@ import (
 	dapr_comp_pubsub "github.com/dapr/components-contrib/pubsub"
 	pubsub_snssqs "github.com/dapr/components-contrib/pubsub/aws/snssqs"
 	pubsub_eventhubs "github.com/dapr/components-contrib/pubsub/azure/eventhubs"
-	"github.com/dapr/components-contrib/pubsub/azure/servicebus"
 	pubsub_gcp "github.com/dapr/components-contrib/pubsub/gcp/pubsub"
 	pubsub_hazelcast "github.com/dapr/components-contrib/pubsub/hazelcast"
+	pubsub_inmemory "github.com/dapr/components-contrib/pubsub/in-memory"
 	pubsub_kafka "github.com/dapr/components-contrib/pubsub/kafka"
 	pubsub_mqtt "github.com/dapr/components-contrib/pubsub/mqtt"
 	"github.com/dapr/components-contrib/pubsub/natsstreaming"
@@ -50,7 +96,10 @@ import (
 	"github.com/dapr/components-contrib/pubsub/rabbitmq"
 	pubsub_redis "github.com/dapr/components-contrib/pubsub/redis"
 	"github.com/dapr/kit/logger"
+
 	"mosn.io/layotto/pkg/runtime/pubsub"
+
+	servicebus "mosn.io/layotto/components/delay_queue/azure/servicebus"
 
 	// RPC
 	"mosn.io/layotto/components/rpc"
@@ -77,17 +126,27 @@ import (
 	"github.com/dapr/components-contrib/state/rethinkdb"
 	"github.com/dapr/components-contrib/state/sqlserver"
 	"github.com/dapr/components-contrib/state/zookeeper"
+
 	runtime_state "mosn.io/layotto/pkg/runtime/state"
 
 	// Lock
 	"mosn.io/layotto/components/lock"
+	lock_consul "mosn.io/layotto/components/lock/consul"
 	lock_etcd "mosn.io/layotto/components/lock/etcd"
+	lock_inmemory "mosn.io/layotto/components/lock/in-memory"
+	lock_mongo "mosn.io/layotto/components/lock/mongo"
 	lock_redis "mosn.io/layotto/components/lock/redis"
 	lock_zookeeper "mosn.io/layotto/components/lock/zookeeper"
 	runtime_lock "mosn.io/layotto/pkg/runtime/lock"
 
 	// Sequencer
 	sequencer_etcd "mosn.io/layotto/components/sequencer/etcd"
+	sequencer_inmemory "mosn.io/layotto/components/sequencer/in-memory"
+	sequencer_mongo "mosn.io/layotto/components/sequencer/mongo"
+	sequencer_mysql "mosn.io/layotto/components/sequencer/mysql"
+	sequencer_redis "mosn.io/layotto/components/sequencer/redis"
+	sequencer_snowflake "mosn.io/layotto/components/sequencer/snowflake"
+	sequencer_zookeeper "mosn.io/layotto/components/sequencer/zookeeper"
 
 	// Actuator
 	_ "mosn.io/layotto/pkg/actuator"
@@ -98,26 +157,77 @@ import (
 
 	"github.com/urfave/cli"
 	"google.golang.org/grpc"
-	_ "mosn.io/layotto/pkg/filter/network/tcpcopy"
-	"mosn.io/layotto/pkg/runtime"
-	"mosn.io/mosn/pkg/featuregate"
 	_ "mosn.io/mosn/pkg/filter/network/grpc"
 	mgrpc "mosn.io/mosn/pkg/filter/network/grpc"
 	_ "mosn.io/mosn/pkg/filter/network/proxy"
 	_ "mosn.io/mosn/pkg/filter/stream/flowcontrol"
+	_ "mosn.io/mosn/pkg/filter/stream/grpcmetric"
 	_ "mosn.io/mosn/pkg/metrics/sink"
 	_ "mosn.io/mosn/pkg/metrics/sink/prometheus"
-	"mosn.io/mosn/pkg/mosn"
 	_ "mosn.io/mosn/pkg/network"
 	_ "mosn.io/mosn/pkg/stream/http"
 	_ "mosn.io/mosn/pkg/wasm/runtime/wasmer"
 	_ "mosn.io/pkg/buffer"
+
+	_ "mosn.io/layotto/pkg/filter/network/tcpcopy"
+	_ "mosn.io/layotto/pkg/filter/stream/wasm/http"
+	l8_grpc "mosn.io/layotto/pkg/grpc"
+	"mosn.io/layotto/pkg/runtime"
+	_ "mosn.io/layotto/pkg/wasm"
+	_ "mosn.io/layotto/pkg/wasm/install"
+	_ "mosn.io/layotto/pkg/wasm/uninstall"
+	_ "mosn.io/layotto/pkg/wasm/update"
+
+	_ "mosn.io/proxy-wasm-go-host/wasmtime"
+
+	_ "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
+	_ "mosn.io/mosn/istio/istio1106"
+	_ "mosn.io/mosn/istio/istio1106/filter/stream/jwtauthn"
+	_ "mosn.io/mosn/istio/istio1106/filter/stream/mixer"
+	_ "mosn.io/mosn/istio/istio1106/filter/stream/stats"
+	_ "mosn.io/mosn/istio/istio1106/sds"
+	_ "mosn.io/mosn/istio/istio1106/xds"
+	_ "mosn.io/mosn/pkg/filter/listener/originaldst"
+	_ "mosn.io/mosn/pkg/filter/network/connectionmanager"
+	_ "mosn.io/mosn/pkg/filter/network/streamproxy"
+	_ "mosn.io/mosn/pkg/filter/network/tunnel"
+	_ "mosn.io/mosn/pkg/filter/stream/dsl"
+	_ "mosn.io/mosn/pkg/filter/stream/dubbo"
+	_ "mosn.io/mosn/pkg/filter/stream/faultinject"
+	_ "mosn.io/mosn/pkg/filter/stream/faulttolerance"
+	_ "mosn.io/mosn/pkg/filter/stream/gzip"
+	_ "mosn.io/mosn/pkg/filter/stream/headertometadata"
+	_ "mosn.io/mosn/pkg/filter/stream/ipaccess"
+	_ "mosn.io/mosn/pkg/filter/stream/mirror"
+	_ "mosn.io/mosn/pkg/filter/stream/payloadlimit"
+	_ "mosn.io/mosn/pkg/filter/stream/proxywasm"
+	_ "mosn.io/mosn/pkg/filter/stream/seata"
+	_ "mosn.io/mosn/pkg/filter/stream/transcoder/http2bolt"
+	_ "mosn.io/mosn/pkg/filter/stream/transcoder/httpconv"
+	_ "mosn.io/mosn/pkg/protocol"
+	_ "mosn.io/mosn/pkg/protocol/xprotocol"
+	_ "mosn.io/mosn/pkg/router"
+	_ "mosn.io/mosn/pkg/server/keeper"
+	_ "mosn.io/mosn/pkg/stream/http2"
+	_ "mosn.io/mosn/pkg/stream/xprotocol"
+	_ "mosn.io/mosn/pkg/trace/jaeger"
+	_ "mosn.io/mosn/pkg/trace/skywalking"
+	_ "mosn.io/mosn/pkg/trace/skywalking/http"
+	_ "mosn.io/mosn/pkg/trace/sofa/http"
+	_ "mosn.io/mosn/pkg/trace/sofa/xprotocol"
+	_ "mosn.io/mosn/pkg/trace/sofa/xprotocol/bolt"
+	_ "mosn.io/mosn/pkg/upstream/healthcheck"
+	_ "mosn.io/mosn/pkg/upstream/servicediscovery/dubbod"
+
+	_ "mosn.io/layotto/diagnostics/exporter_iml"
 )
 
-var (
-	// loggerForDaprComp is constructed for reusing dapr's components.
-	loggerForDaprComp = logger.NewLogger("reuse.dapr.component")
-)
+// loggerForDaprComp is constructed for reusing dapr's components.
+var loggerForDaprComp = logger.NewLogger("reuse.dapr.component")
+
+// GitVersion mosn version is specified by latest tag
+var GitVersion = ""
+var IstioVersion = "1.10.6"
 
 func init() {
 	mgrpc.RegisterServerHandler("runtime", NewRuntimeGrpcServer)
@@ -128,17 +238,42 @@ func init() {
 }
 
 func NewRuntimeGrpcServer(data json.RawMessage, opts ...grpc.ServerOption) (mgrpc.RegisteredServer, error) {
+	var err error
+	defer func() {
+		if err != nil {
+			// fail fast if error occurs during startup.
+			// The reason we panic in a new goroutine is to prevent mosn from recovering.
+			go func() {
+				log.DefaultLogger.Errorf("An error occurred during startup : %v", err)
+				panic(err)
+			}()
+		}
+	}()
 	// 1. parse config
 	cfg, err := runtime.ParseRuntimeConfig(data)
 	if err != nil {
-		actuator.GetRuntimeReadinessIndicator().SetUnhealthy(fmt.Sprintf("parse config error.%v", err))
 		return nil, err
 	}
 	// 2. new instance
 	rt := runtime.NewMosnRuntime(cfg)
+	rt.AppendInitRuntimeStage(runtime.DefaultInitRuntimeStage)
 	// 3. run
 	server, err := rt.Run(
 		runtime.WithGrpcOptions(opts...),
+		// wrap the grpc server with actuator
+		runtime.WithNewServer(func(apis []l8_grpc.GrpcAPI, opts ...grpc.ServerOption) (mgrpc.RegisteredServer, error) {
+			server, err := l8_grpc.NewDefaultServer(apis, opts...)
+			if err != nil {
+				return nil, err
+			}
+			return actuator.NewGrpcServerWithActuator(server)
+		}),
+		// register your gRPC API here
+		runtime.WithGrpcAPI(
+			default_api.NewGrpcAPI,
+			lifecycle.NewLifecycleAPI,
+		),
+		runtime.WithExtensionGrpcAPI(),
 		// Hello
 		runtime.WithHelloFactory(
 			hello.NewHelloFactory("helloworld", helloworld.NewHelloWorld),
@@ -147,11 +282,31 @@ func NewRuntimeGrpcServer(data json.RawMessage, opts ...grpc.ServerOption) (mgrp
 		runtime.WithConfigStoresFactory(
 			configstores.NewStoreFactory("apollo", apollo.NewStore),
 			configstores.NewStoreFactory("etcd", etcdv3.NewStore),
+			configstores.NewStoreFactory("nacos", nacos.NewStore),
 		),
+
 		// RPC
 		runtime.WithRpcFactory(
 			rpc.NewRpcFactory("mosn", mosninvoker.NewMosnInvoker),
 		),
+
+		// File
+		runtime.WithFileFactory(
+			file.NewFileFactory("aliyun.oss", aliyun_file.NewAliyunFile),
+			file.NewFileFactory("minio", minio.NewMinioOss),
+			file.NewFileFactory("aws.s3", aws.NewAwsFile),
+			file.NewFileFactory("tencent.oss", tencentcloud.NewTencentCloudOSS),
+			file.NewFileFactory("local", local.NewLocalStore),
+			file.NewFileFactory("qiniu.oss", qiniu.NewQiniuOSS),
+		),
+		runtime.WithOssFactory(
+			oss.NewFactory("aws.oss", aws_oss.NewAwsOss),
+			oss.NewFactory("aliyun.oss", aliyun_oss.NewAliyunOss),
+			oss.NewFactory("ceph", ceph_oss.NewCephOss),
+			oss.NewFactory("huaweicloud.oss", huaweicloud_oss.NewHuaweicloudOSS),
+		),
+		// Cryption
+		runtime.WithCryptionServiceFactory(cryption.NewFactory("aliyun.kms", aliyun.NewCryption)),
 		// PubSub
 		runtime.WithPubSubFactory(
 			pubsub.NewFactory("redis", func() dapr_comp_pubsub.PubSub {
@@ -187,9 +342,15 @@ func NewRuntimeGrpcServer(data json.RawMessage, opts ...grpc.ServerOption) (mgrp
 			pubsub.NewFactory("pulsar", func() dapr_comp_pubsub.PubSub {
 				return pubsub_pulsar.NewPulsar(loggerForDaprComp)
 			}),
+			pubsub.NewFactory("in-memory", func() dapr_comp_pubsub.PubSub {
+				return pubsub_inmemory.New(loggerForDaprComp)
+			}),
 		),
 		// State
 		runtime.WithStateFactory(
+			runtime_state.NewFactory("in-memory", func() state.Store {
+				return mock_state.New(loggerForDaprComp)
+			}),
 			runtime_state.NewFactory("redis", func() state.Store {
 				return state_redis.NewRedisStateStore(loggerForDaprComp)
 			}),
@@ -248,6 +409,9 @@ func NewRuntimeGrpcServer(data json.RawMessage, opts ...grpc.ServerOption) (mgrp
 		),
 		// Lock
 		runtime.WithLockFactory(
+			runtime_lock.NewFactory("redis_cluster", func() lock.LockStore {
+				return lock_redis.NewClusterRedisLock(log.DefaultLogger)
+			}),
 			runtime_lock.NewFactory("redis", func() lock.LockStore {
 				return lock_redis.NewStandaloneRedisLock(log.DefaultLogger)
 			}),
@@ -257,63 +421,77 @@ func NewRuntimeGrpcServer(data json.RawMessage, opts ...grpc.ServerOption) (mgrp
 			runtime_lock.NewFactory("etcd", func() lock.LockStore {
 				return lock_etcd.NewEtcdLock(log.DefaultLogger)
 			}),
+			runtime_lock.NewFactory("consul", func() lock.LockStore {
+				return lock_consul.NewConsulLock(log.DefaultLogger)
+			}),
+			runtime_lock.NewFactory("mongo", func() lock.LockStore {
+				return lock_mongo.NewMongoLock(log.DefaultLogger)
+			}),
+			runtime_lock.NewFactory("in-memory", func() lock.LockStore {
+				return lock_inmemory.NewInMemoryLock()
+			}),
 		),
+
+		// bindings
+		runtime.WithOutputBindings(
+			bindings.NewOutputBindingFactory("http", func() dbindings.OutputBinding {
+				return http.NewHTTP(loggerForDaprComp)
+			}),
+		),
+
 		// Sequencer
 		runtime.WithSequencerFactory(
 			runtime_sequencer.NewFactory("etcd", func() sequencer.Store {
 				return sequencer_etcd.NewEtcdSequencer(log.DefaultLogger)
 			}),
+			runtime_sequencer.NewFactory("redis", func() sequencer.Store {
+				return sequencer_redis.NewStandaloneRedisSequencer(log.DefaultLogger)
+			}),
+			runtime_sequencer.NewFactory("zookeeper", func() sequencer.Store {
+				return sequencer_zookeeper.NewZookeeperSequencer(log.DefaultLogger)
+			}),
+			runtime_sequencer.NewFactory("mongo", func() sequencer.Store {
+				return sequencer_mongo.NewMongoSequencer(log.DefaultLogger)
+			}),
+			runtime_sequencer.NewFactory("in-memory", func() sequencer.Store {
+				return sequencer_inmemory.NewInMemorySequencer()
+			}),
+			runtime_sequencer.NewFactory("mysql", func() sequencer.Store {
+				return sequencer_mysql.NewMySQLSequencer(log.DefaultLogger)
+			}),
+			runtime_sequencer.NewFactory("snowflake", func() sequencer.Store {
+				return sequencer_snowflake.NewSnowFlakeSequencer(log.DefaultLogger)
+			}),
+		),
+		// secretstores
+		runtime.WithSecretStoresFactory(
+			secretstores_loader.NewFactory("kubernetes", func() secretstores.SecretStore {
+				return sercetstores_kubernetes.NewKubernetesSecretStore(loggerForDaprComp)
+			}),
+			secretstores_loader.NewFactory("azure.keyvault", func() secretstores.SecretStore {
+				return keyvault.NewAzureKeyvaultSecretStore(loggerForDaprComp)
+			}),
+			secretstores_loader.NewFactory("hashicorp.vault", func() secretstores.SecretStore {
+				return vault.NewHashiCorpVaultSecretStore(loggerForDaprComp)
+			}),
+			secretstores_loader.NewFactory("aws.secretmanager", func() secretstores.SecretStore {
+				return secretmanager.NewSecretManager(loggerForDaprComp)
+			}),
+			secretstores_loader.NewFactory("aws.parameterstore", func() secretstores.SecretStore {
+				return parameterstore.NewParameterStore(loggerForDaprComp)
+			}),
+			secretstores_loader.NewFactory("gcp.secretmanager", func() secretstores.SecretStore {
+				return gcp_secretmanager.NewSecreteManager(loggerForDaprComp)
+			}),
+			secretstores_loader.NewFactory("local.file", func() secretstores.SecretStore {
+				return secretstore_file.NewLocalSecretStore(loggerForDaprComp)
+			}),
+			secretstores_loader.NewFactory("local.env", func() secretstores.SecretStore {
+				return secretstore_env.NewEnvSecretStore(loggerForDaprComp)
+			}),
 		))
-	// 4. check if unhealthy
-	if err != nil {
-		actuator.GetRuntimeReadinessIndicator().SetUnhealthy(err.Error())
-		actuator.GetRuntimeLivenessIndicator().SetUnhealthy(err.Error())
-	}
 	return server, err
 }
-
-var (
-	cmdStart = cli.Command{
-		Name:  "start",
-		Usage: "start runtime",
-		Flags: []cli.Flag{
-			cli.StringFlag{
-				Name:   "config, c",
-				Usage:  "Load configuration from `FILE`",
-				EnvVar: "RUNTIME_CONFIG",
-				Value:  "configs/config.json",
-			}, cli.StringFlag{
-				Name:   "feature-gates, f",
-				Usage:  "config feature gates",
-				EnvVar: "FEATURE_GATES",
-			},
-		},
-		Action: func(c *cli.Context) error {
-			stm := mosn.NewStageManager(c, c.String("config"))
-
-			stm.AppendParamsParsedStage(func(c *cli.Context) {
-				err := featuregate.Set(c.String("feature-gates"))
-				if err != nil {
-					os.Exit(1)
-				}
-			})
-
-			stm.AppendInitStage(mosn.DefaultInitStage)
-
-			stm.AppendPreStartStage(mosn.DefaultPreStartStage) // called finally stage by default
-
-			stm.AppendStartStage(mosn.DefaultStartStage)
-
-			stm.Run()
-
-			actuator.GetRuntimeReadinessIndicator().SetStarted()
-			actuator.GetRuntimeLivenessIndicator().SetStarted()
-			// wait mosn finished
-			stm.WaitFinish()
-			return nil
-		},
-	}
-)
 
 func main() {
 	app := newRuntimeApp(&cmdStart)
@@ -327,22 +505,26 @@ func registerAppInfo(app *cli.App) {
 	appInfo.Version = app.Version
 	appInfo.Compiled = app.Compiled
 	actuator.SetAppInfoSingleton(appInfo)
+	// set istio version
+	istio.IstioVersion = IstioVersion
 }
 
 func newRuntimeApp(startCmd *cli.Command) *cli.App {
 	app := cli.NewApp()
 	app.Name = "Layotto"
-	app.Version = "0.1.0"
+	app.Version = GitVersion
 	app.Compiled = time.Now()
-	app.Copyright = "(c) " + strconv.Itoa(time.Now().Year()) + " Ant Group"
+	app.Copyright = "(c) " + strconv.Itoa(time.Now().Year()) + " Layotto Authors"
 	app.Usage = "A fast and efficient cloud native application runtime based on MOSN."
 	app.Flags = cmdStart.Flags
 
-	//commands
+	// commands
 	app.Commands = []cli.Command{
 		cmdStart,
+		cmdStop,
+		cmdReload,
 	}
-	//action
+	// action
 	app.Action = func(c *cli.Context) error {
 		if c.NumFlags() == 0 {
 			return cli.ShowAppHelp(c)

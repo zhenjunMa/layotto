@@ -18,13 +18,15 @@ package client
 
 import (
 	"context"
-	"github.com/pkg/errors"
-	"google.golang.org/grpc"
 	"log"
-	runtimev1pb "mosn.io/layotto/spec/proto/runtime/v1"
 	"net"
 	"os"
 	"sync"
+
+	"github.com/pkg/errors"
+	"google.golang.org/grpc"
+
+	runtimev1pb "mosn.io/layotto/spec/proto/runtime/v1"
 )
 
 const (
@@ -39,12 +41,25 @@ var (
 	doOnce        sync.Once
 )
 
-// Client is the interface for runtime client implementation.
-
-type Client interface {
+type runtimeAPI interface {
 	SayHello(ctx context.Context, in *SayHelloRequest) (*SayHelloResp, error)
 
 	GetConfiguration(ctx context.Context, in *ConfigurationRequestItem) ([]*ConfigurationItem, error)
+
+	// InvokeMethod invokes service without raw data
+	InvokeMethod(ctx context.Context, appID, methodName, verb string) (out []byte, err error)
+
+	// InvokeMethodWithContent invokes service with content
+	InvokeMethodWithContent(ctx context.Context, appID, methodName, verb string, content *DataContent) (out []byte, err error)
+
+	// InvokeMethodWithCustomContent invokes app with custom content (struct + content type).
+	InvokeMethodWithCustomContent(ctx context.Context, appID, methodName, verb string, contentType string, content interface{}) (out []byte, err error)
+
+	// PublishEvent publishes data onto topic in specific pubsub component.
+	PublishEvent(ctx context.Context, pubsubName, topicName string, data []byte) error
+
+	// PublishEventfromCustomContent serializes an struct and publishes its contents as data (JSON) onto topic in specific pubsub component.
+	PublishEventfromCustomContent(ctx context.Context, pubsubName, topicName string, data interface{}) error
 
 	// SaveConfiguration saves configuration into configuration store.
 	SaveConfiguration(ctx context.Context, in *SaveConfigurationRequest) error
@@ -54,9 +69,6 @@ type Client interface {
 
 	// SubscribeConfiguration gets configuration from configuration store and subscribe the updates.
 	SubscribeConfiguration(ctx context.Context, in *ConfigurationRequestItem) WatchChan
-
-	// Publishes events to the specific topic.
-	PublishEvent(ctx context.Context, in *PublishEventRequest) error
 
 	// SaveState saves the raw data into store using default state options.
 	SaveState(ctx context.Context, storeName, key string, data []byte, so ...StateOption) error
@@ -96,6 +108,10 @@ type Client interface {
 	// Get next unique id with some auto-increment guarantee
 	GetNextId(ctx context.Context, in *runtimev1pb.GetNextIdRequest) (*runtimev1pb.GetNextIdResponse, error)
 
+	// Secret API
+	GetSecret(ctx context.Context, in *runtimev1pb.GetSecretRequest, opts ...grpc.CallOption) (*runtimev1pb.GetSecretResponse, error)
+	GetBulkSecret(ctx context.Context, in *runtimev1pb.GetBulkSecretRequest, opts ...grpc.CallOption) (*runtimev1pb.GetBulkSecretResponse, error)
+
 	// Close cleans up all resources created by the client.
 	Close()
 }
@@ -104,9 +120,10 @@ type Client interface {
 // Note, this default factory function creates runtime client only once. All subsequent invocations
 // will return the already created instance. To create multiple instances of the runtime client,
 // use one of the parameterized factory functions:
-//   NewClientWithPort(port string) (client Client, err error)
-//   NewClientWithAddress(address string) (client Client, err error)
-//   NewClientWithConnection(conn *grpc.ClientConn) Client
+//
+// NewClientWithPort(port string) (client Client, err error)
+// NewClientWithAddress(address string) (client Client, err error)
+// NewClientWithConnection(conn *grpc.ClientConn) Client
 func NewClient() (client Client, err error) {
 	port := os.Getenv(runtimePortEnvVarName)
 	if port == "" {
@@ -142,21 +159,6 @@ func NewClientWithAddress(address string) (client Client, err error) {
 	}
 
 	return NewClientWithConnection(conn), nil
-}
-
-// NewClientWithConnection instantiates runtime client using specific connection.
-func NewClientWithConnection(conn *grpc.ClientConn) Client {
-	return &GRPCClient{
-		connection:  conn,
-		protoClient: runtimev1pb.NewRuntimeClient(conn),
-	}
-}
-
-// GRPCClient is the gRPC implementation of runtime client.
-type GRPCClient struct {
-	connection  *grpc.ClientConn
-	protoClient runtimev1pb.RuntimeClient
-	mux         sync.Mutex
 }
 
 // Close cleans up all resources created by the client.

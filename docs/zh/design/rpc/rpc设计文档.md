@@ -1,13 +1,13 @@
 RPC 设计文档
 
-### API
-layotto rpc接口与Dapr保持一致.
+### API 设计
+[layotto rpc API](https://github.com/mosn/layotto/blob/f70cdc619693ad762cf809daf0579403c341def1/spec/proto/runtime/v1/runtime.proto#L19https://github.com/mosn/layotto/blob/f70cdc619693ad762cf809daf0579403c341def1/spec/proto/runtime/v1/runtime.proto#L19) 与Dapr保持一致.
 
 ### 核心抽象
 为了与pb定义解耦，添加了一层RPC核心抽象.
 
-- invoker： 提供完整对RPC能力， 目前只对接了Mosn
-- callback：before/after filter, 可以在请求执行前后执行自定义的逻辑
+- invoker： 提供完整的 RPC能力， 目前只对接了Mosn
+- callback：before/after filter, 可以在请求执行前后执行自定义的逻辑（例如添加请求头，例如协议转换)
 - channel：发送请求，接收响应，负责与不同传输协议交互
 
 由于Mosn已经有了完整的RPC能力支持，layotto只提供了非常轻量的RPC框架
@@ -32,6 +32,7 @@ Mosn通过xprotocol支持了流行的RPC协议.
 在Layotto里设计了对应的扩展机制，只需要完成RPC请求响应与xprotocol frame的互相转换，就可以方便的支持xprotocl协议.
 
 #### 配置参数
+
 ```bigquery
 {
   "mosn": {

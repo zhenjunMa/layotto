@@ -18,12 +18,15 @@ package client
 
 import (
 	"context"
-	"github.com/stretchr/testify/assert"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSayHello(t *testing.T) {
-	item := &SayHelloRequest{"helloworld"}
+	item := &SayHelloRequest{
+		ServiceName: "helloworld",
+	}
 	resp, err := testClient.SayHello(context.Background(), item)
 	assert.Nil(t, err)
 	assert.Equal(t, resp.Hello, "world")

@@ -22,22 +22,21 @@ import (
 )
 
 type grpcOptions struct {
-	api     API
+	apis    []GrpcAPI
 	maker   NewServer
 	options []grpc.ServerOption
 }
 
 type Option func(o *grpcOptions)
 
-// add an api for grpc server.
-// api CANNOT be nil.
-func WithAPI(api API) Option {
+// apis CANNOT be nil.
+func WithGrpcAPIs(apis []GrpcAPI) Option {
 	return func(o *grpcOptions) {
-		o.api = api
+		o.apis = apis
 	}
 }
 
-type NewServer func(api API, opts ...grpc.ServerOption) mgrpc.RegisteredServer
+type NewServer func(apis []GrpcAPI, opts ...grpc.ServerOption) (mgrpc.RegisteredServer, error)
 
 func WithNewServer(f NewServer) Option {
 	return func(o *grpcOptions) {

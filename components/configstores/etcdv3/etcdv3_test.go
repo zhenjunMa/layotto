@@ -1,3 +1,15 @@
+// Copyright 2021 Layotto Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package etcdv3
 
 import (
@@ -13,10 +25,14 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/server/v3/embed"
+
 	"mosn.io/layotto/components/configstores"
 )
 
-const defaultEtcdV3WorkDir = "/tmp/default-dubbo-go-remote.etcd"
+const (
+	appId                = "mosn"
+	defaultEtcdV3WorkDir = "/tmp/default-dubbo-go-remote.etcd"
+)
 
 var etcd EtcdV3ConfigStore
 
@@ -39,7 +55,7 @@ func TestGetDetailInfoFromResult(t *testing.T) {
 	kvs = append(kvs, kv3)
 	kvs = append(kvs, kv4)
 	kvs = append(kvs, kv5)
-	targetStr := []string{"mosn", "group1", "label1", "sofa"}
+	targetStr := []string{appId, "group1", "label1", "sofa"}
 	res := etcd.GetItemsFromAllKeys(kvs, targetStr)
 	for _, value := range res {
 		assert.Equal(t, value.Group, "group1")
@@ -48,7 +64,7 @@ func TestGetDetailInfoFromResult(t *testing.T) {
 		assert.Equal(t, value.Content, "value1")
 		assert.Equal(t, value.Tags, map[string]string{"tag1": "tag1", "tag2": "tag2"})
 	}
-	targetStr2 := []string{"mosn", "*", "label1", "sofa"}
+	targetStr2 := []string{appId, "*", "label1", "sofa"}
 	res = etcd.GetItemsFromAllKeys(kvs, targetStr2)
 	for _, value := range res {
 		assert.Equal(t, value.Group, "group1")
@@ -58,7 +74,7 @@ func TestGetDetailInfoFromResult(t *testing.T) {
 		assert.Equal(t, value.Tags, map[string]string{"tag1": "tag1", "tag2": "tag2"})
 	}
 
-	targetStr3 := []string{"mosn", "*", "*", "sofa"}
+	targetStr3 := []string{appId, "*", "*", "sofa"}
 	res = etcd.GetItemsFromAllKeys(kvs, targetStr3)
 	for _, value := range res {
 		assert.Equal(t, value.Group, "group1")
@@ -142,31 +158,31 @@ func (suite *ClientTestSuite) SetupTest() {
 
 func (suite *ClientTestSuite) Delete() {
 	var delReq configstores.DeleteRequest
-	delReq.AppId = "mosn"
+	delReq.AppId = appId
 	delReq.Keys = []string{"sofa"}
-	delReq.Group = "default"
-	delReq.Label = "default"
+	delReq.Group = defaultGroup
+	delReq.Label = defaultLabel
 	err := suite.store.Delete(context.Background(), &delReq)
 	if err != nil {
 		suite.T().Fatal(err)
 	}
 
 	var req configstores.GetRequest
-	req.AppId = "mosn"
+	req.AppId = appId
 	req.Keys = []string{"sofa"}
 
 	resp, err := suite.store.Get(context.Background(), &req)
 	assert.Equal(suite.T(), len(resp), 0)
-
+	assert.Nil(suite.T(), err)
 }
 
 func (suite *ClientTestSuite) Subscribe() {
 	var subReq configstores.SubscribeReq
 	var i int
 	ch := make(chan *configstores.SubscribeResp)
-	subReq.AppId = "mosn"
-	subReq.Group = "default"
-	subReq.Label = "default"
+	subReq.AppId = appId
+	subReq.Group = defaultGroup
+	subReq.Label = defaultLabel
 	subReq.Keys = []string{"sofa"}
 	wg.Add(1)
 	suite.store.Subscribe(&subReq, ch)
@@ -174,21 +190,22 @@ func (suite *ClientTestSuite) Subscribe() {
 		if i == 0 {
 			assert.Equal(suite.T(), event.Items[0].Key, "sofa")
 			assert.Equal(suite.T(), event.Items[0].Content, "v1")
+			assert.Equal(suite.T(), event.StoreName, "etcd")
 			i++
 			continue
 		}
 		assert.Equal(suite.T(), event.Items[0].Key, "sofa")
 		assert.Equal(suite.T(), event.Items[0].Content, "")
-
+		assert.Equal(suite.T(), event.StoreName, "etcd")
 	}
 	wg.Done()
 }
 
 func (suite *ClientTestSuite) Get() {
 	var req configstores.GetRequest
-	req.AppId = "mosn"
-	req.Group = "default"
-	req.Label = "default"
+	req.AppId = appId
+	req.Group = defaultGroup
+	req.Label = defaultLabel
 	req.Keys = []string{"sofa"}
 	resp, err := suite.store.Get(context.Background(), &req)
 	if err != nil || len(resp) == 0 {
@@ -197,8 +214,8 @@ func (suite *ClientTestSuite) Get() {
 	for _, value := range resp {
 		assert.Equal(suite.T(), value.Key, "sofa")
 		assert.Equal(suite.T(), value.Content, "v1")
-		assert.Equal(suite.T(), value.Group, "default")
-		assert.Equal(suite.T(), value.Label, "default")
+		assert.Equal(suite.T(), value.Group, defaultGroup)
+		assert.Equal(suite.T(), value.Label, defaultLabel)
 	}
 
 	req.Keys = []string{}
@@ -209,8 +226,8 @@ func (suite *ClientTestSuite) Get() {
 	for _, value := range resp {
 		assert.Equal(suite.T(), value.Key, "sofa")
 		assert.Equal(suite.T(), value.Content, "v1")
-		assert.Equal(suite.T(), value.Group, "default")
-		assert.Equal(suite.T(), value.Label, "default")
+		assert.Equal(suite.T(), value.Group, defaultGroup)
+		assert.Equal(suite.T(), value.Label, defaultLabel)
 	}
 }
 
@@ -219,10 +236,10 @@ func (suite *ClientTestSuite) Set() {
 	var item configstores.ConfigurationItem
 	item.Key = "sofa"
 	item.Content = "v1"
-	item.Group = "default"
-	item.Label = "default"
+	item.Group = defaultGroup
+	item.Label = defaultLabel
 	req.StoreName = "etcd"
-	req.AppId = "mosn"
+	req.AppId = appId
 	req.Items = append(req.Items, &item)
 	err := suite.store.Set(context.Background(), &req)
 	if err != nil {

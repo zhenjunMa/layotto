@@ -1,3 +1,15 @@
+// Copyright 2021 Layotto Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 package transport_protocol
 
 import (
@@ -7,10 +19,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"mosn.io/layotto/components/rpc"
 	"mosn.io/mosn/pkg/protocol/xprotocol/bolt"
 	"mosn.io/pkg/buffer"
 	"mosn.io/pkg/header"
+
+	"mosn.io/layotto/components/rpc"
 )
 
 func Test_boltCommon_FromFrame(t *testing.T) {
@@ -18,7 +31,7 @@ func Test_boltCommon_FromFrame(t *testing.T) {
 		resp := &bolt.Response{
 			Content: buffer.NewIoBuffer(100),
 			ResponseHeader: bolt.ResponseHeader{
-				Header: header.BytesHeader{
+				BytesHeader: header.BytesHeader{
 					Kvs: []header.BytesKV{
 						{
 							Key:   []byte("key1"),
@@ -53,9 +66,58 @@ func Test_boltCommon_FromFrame(t *testing.T) {
 		err := b.Init(conf)
 		assert.Nil(t, err)
 
-		_, err = b.FromFrame(resp)
-		assert.NotNil(t, err)
-		assert.Equal(t, "bolt error code 1", err.Error())
+		f, err := b.FromFrame(resp)
+		assert.Nil(t, err)
+		assert.Equal(t, false, f.Success)
+		assert.True(t, strings.Contains(f.Error.Error(), "bolt error code 1"))
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		resp := &bolt.Response{}
+		resp.ResponseStatus = bolt.ResponseStatusServerDeserialException
+		b := &boltCommon{}
+		conf := map[string]interface{}{
+			"class": "bolt",
+		}
+		err := b.Init(conf)
+		assert.Nil(t, err)
+
+		f, err := b.FromFrame(resp)
+		assert.Nil(t, err)
+		assert.Equal(t, false, f.Success)
+		assert.True(t, strings.Contains(f.Error.Error(), "bolt error code 18"))
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		resp := &bolt.Response{}
+		resp.ResponseStatus = bolt.ResponseStatusServerSerialException
+		b := &boltCommon{}
+		conf := map[string]interface{}{
+			"class": "bolt",
+		}
+		err := b.Init(conf)
+		assert.Nil(t, err)
+
+		f, err := b.FromFrame(resp)
+		assert.Nil(t, err)
+		assert.Equal(t, false, f.Success)
+		assert.True(t, strings.Contains(f.Error.Error(), "bolt error code 17"))
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		resp := &bolt.Response{}
+		resp.ResponseStatus = bolt.ResponseStatusCodecException
+		b := &boltCommon{}
+		conf := map[string]interface{}{
+			"class": "bolt",
+		}
+		err := b.Init(conf)
+		assert.Nil(t, err)
+
+		f, err := b.FromFrame(resp)
+		assert.Nil(t, err)
+		assert.Equal(t, false, f.Success)
+		assert.True(t, strings.Contains(f.Error.Error(), "bolt error code 9"))
 	})
 }
 

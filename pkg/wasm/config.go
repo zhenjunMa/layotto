@@ -25,16 +25,18 @@ import (
 	"mosn.io/mosn/pkg/log"
 )
 
-type filterConfig struct {
+type filterConfigItem struct {
 	FromWasmPlugin string            `json:"from_wasm_plugin,omitempty"`
 	VmConfig       *v2.WasmVmConfig  `json:"vm_config,omitempty"`
 	InstanceNum    int               `json:"instance_num,omitempty"`
 	RootContextID  int32             `json:"root_context_id,omitempty"`
 	UserData       map[string]string `json:"-"`
+	PluginName     string            `json:"-"`
 }
 
-func parseFilterConfig(cfg map[string]interface{}) (*filterConfig, error) {
-	config := filterConfig{
+// Parse filterConfigItem
+func parseFilterConfigItem(cfg map[string]interface{}) (*filterConfigItem, error) {
+	config := filterConfigItem{
 		UserData:      make(map[string]string),
 		RootContextID: 1, // default value is 1
 	}
@@ -63,7 +65,8 @@ func parseFilterConfig(cfg map[string]interface{}) (*filterConfig, error) {
 	return &config, nil
 }
 
-func checkVmConfig(config *filterConfig) error {
+// Check VMconfig of filterConfigItem
+func checkVmConfig(config *filterConfigItem) error {
 	if config.FromWasmPlugin != "" {
 		config.VmConfig = nil
 		config.InstanceNum = 0
@@ -81,7 +84,8 @@ func checkVmConfig(config *filterConfig) error {
 	return nil
 }
 
-func parseUserData(rawConfigBytes []byte, config *filterConfig) error {
+// Parse user data
+func parseUserData(rawConfigBytes []byte, config *filterConfigItem) error {
 	if len(rawConfigBytes) == 0 || config == nil {
 		log.DefaultLogger.Errorf("[proxywasm][config] fail to parse user data, invalid param, raw: %v, config: %v",
 			string(rawConfigBytes), config)
@@ -90,6 +94,7 @@ func parseUserData(rawConfigBytes []byte, config *filterConfig) error {
 
 	m := make(map[string]interface{})
 
+	// check rawConfigBytes
 	if err := json.Unmarshal(rawConfigBytes, &m); err != nil {
 		log.DefaultLogger.Errorf("[proxywasm][config] fail to unmarshal user data, err: %v", err)
 		return err

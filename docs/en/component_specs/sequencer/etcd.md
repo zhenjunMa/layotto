@@ -1,7 +1,7 @@
 # Etcd
 
 ## metadata fields
-Example: configs/config_sequencer_etcd.json
+Example: configs/runtime_config.json
 
 | Field | Required | Description |
 | --- | --- | --- |
@@ -22,6 +22,7 @@ Steps：
 download etcd from `https://github.com/etcd-io/etcd/releases` （You can also use docker.）
 
 start：
+
 ````shell
 ./etcd
 ````
@@ -31,21 +32,23 @@ default listen address `localhost:2379`
 ## Run layotto
 
 ````shell
-cd ${projectpath}/cmd/layotto
+cd ${project_path}/cmd/layotto
 go build
 ````
+
 >If build reports an error, it can be executed in the root directory of the project `go mod vendor`
 
 Execute after the compilation is successful:
+
 ````shell
-./layotto start -c ../../configs/config_sequencer_etcd.json
+./layotto start -c ../../configs/runtime_config.json
 ````
 
 ## Run Demo
 
 ````shell
-cd ${projectpath}/demo/sequencer/etcd/
+cd ${project_path}/demo/sequencer/etcd/
  go build -o client
- ./client -s "etcd"
+ ./client -s "sequencer_demo"
 ````
 

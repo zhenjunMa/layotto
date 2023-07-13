@@ -22,8 +22,19 @@ import (
 	"strings"
 )
 
+const (
+	TargetAddress    = "rpc_target_address"
+	RequestTimeoutMs = "rpc_request_timeout"
+)
+
+const (
+	DefaultRequestTimeoutMs = 3000
+)
+
+// RPCHeader is storage header info
 type RPCHeader map[string][]string
 
+// Range is handle RPCHeader info
 func (r RPCHeader) Range(f func(key string, value string) bool) {
 	if len(r) == 0 {
 		return
@@ -36,6 +47,7 @@ func (r RPCHeader) Range(f func(key string, value string) bool) {
 	}
 }
 
+// Get is get RPCHeader info
 func (r RPCHeader) Get(key string) string {
 	if r == nil {
 		return ""
@@ -47,8 +59,11 @@ func (r RPCHeader) Get(key string) string {
 	return strings.Join(values, ",")
 }
 
+// RPCRequest is request info
 type RPCRequest struct {
-	Ctx         context.Context
+	// context
+	Ctx context.Context
+	// request id
 	Id          string
 	Timeout     int32
 	Method      string
@@ -57,35 +72,46 @@ type RPCRequest struct {
 	Data        []byte
 }
 
+// RPCResponse is response info
 type RPCResponse struct {
 	Ctx         context.Context
 	Header      RPCHeader
 	ContentType string
 	Data        []byte
+	Success     bool
+	Error       error
 }
 
 type RpcConfig struct {
 	Config json.RawMessage
 }
 
+// Invoker is interface for init rpc config or invoke rpc request
 type Invoker interface {
 	Init(config RpcConfig) error
 	Invoke(ctx context.Context, req *RPCRequest) (*RPCResponse, error)
 }
 
+// Callback is interface for before invoke or after invoke
 type Callback interface {
+	// AddBeforeInvoke is add BeforeInvoke func
 	AddBeforeInvoke(CallbackFunc)
+	// AddAfterInvoke is add AfterInvoke func
 	AddAfterInvoke(CallbackFunc)
 
+	// BeforeInvoke is used to invoke beforeInvoke callbacks
 	BeforeInvoke(*RPCRequest) (*RPCRequest, error)
+	// AfterInvoke is used to invoke afterInvoke callbacks
 	AfterInvoke(*RPCResponse) (*RPCResponse, error)
 }
 
+// CallbackFunc is Callback implement
 type CallbackFunc struct {
 	Name   string          `json:"name"`
 	Config json.RawMessage `json:"config"`
 }
 
+// Channel is handle RPCRequest to RPCResponse
 type Channel interface {
 	Do(*RPCRequest) (*RPCResponse, error)
 }
