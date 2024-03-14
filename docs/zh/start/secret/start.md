@@ -5,6 +5,8 @@ Secret API用于从file、env、k8s等获取secret
 Secret API支持获取单个和所有secret
 ## 快速开始
 
+aa
+
 该示例展示了如何通过Layotto Secret API 获取 file、env、k8s中的secret
 
 
