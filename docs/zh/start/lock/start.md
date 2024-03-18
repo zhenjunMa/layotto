@@ -10,6 +10,7 @@
 <!-- tabs:start -->
 ### **使用 Docker Compose**
 您可以用 docker-compose 启动 Redis 和 Layotto
+sdfasdf
 
 ```bash
 cd docker/layotto-redis
